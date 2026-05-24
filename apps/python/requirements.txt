@@ -1,0 +1,27 @@
+# Web framework
+fastapi==0.115.12
+uvicorn==0.34.2
+httpx==0.28.1
+python-multipart==0.0.27
+
+# Environment
+python-dotenv==1.0.1
+
+# Supabase
+supabase==2.15.1
+
+# Document generation
+openpyxl==3.1.5
+python-docx==1.2.0
+
+# Speech to text
+faster-whisper==1.2.1
+
+# RAG
+llama-index==0.14.21
+llama-index-vector-stores-supabase==0.5.0
+
+# LangChain
+langchain>=0.3.0
+langchain-community>=0.3.0
+ollama==0.6.2

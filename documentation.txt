@@ -1,0 +1,53 @@
+finish the UI.
+
+
+implement excel logic!
+there is a logic about the calendar functionality in the pinned chat.
+every package is downloaded and the setup from claude is completed, start implementing langchain logic (LCEL chains) once excel and word files are set up completely.
+add auth from supabase and RLS security
+add indexes for performance when querying
+2 clients can be created under the same tennant with the same email!
+think of a new UI?
+
+*Add system prompts in the routers (or a dedicated services/prompts.py file) where you know the context.
+For example, when you implement routers/rag.py, the RAG-specific system prompt lives there. A document generation prompt lives in routers/documents.py. That way each feature owns its own instructions and langchain.py stays reusable.
+If several routers end up sharing similar prompts, you can consolidate them into a services/prompts.py file. But start in the routers — no need to abstract early.
+
+Can we now revert from SMTP to the way it was with gmail before and complete that set up properly since we are aware that the logic works properly(complex process so use an LLM too)
+Implement security for prompt injection!
+
+
+
+
+
+
+FRONT END 
+Calendar tool can be displayed, meetings can be set manually in the UI, they just shouldnt be calling the MCPtool directly because of secret env variables.
+
+SEND INVOICE TO CLIENT
+
+cd /c/Users/Jovan/Desktop/AI-Secretary/apps/agent && pnpm exec tsx -e "
+import { sendDocumentToClient } from './src/mcp/gmail.ts';
+(async () => {
+  const result = await sendDocumentToClient(tenantId, clientId, documentId, 'invoice');
+  console.log(JSON.stringify(result, null, 2));
+})();
+
+
+Start the FastAPI server
+cd /c/Users/Jovan/Desktop/AI-Secretary/apps/python
+python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+In a second terminal, open the FastAPI interactive test client (Swagger UI)
+cmd.exe /c start http://127.0.0.1:8000/docs
+
+Optional: open ReDoc
+cmd.exe /c start http://127.0.0.1:8000/redoc
+
+Front end needs supabase connection and auth implementation
+Semantic search isnt needed in the first plan for the invoices retrival it can be done with a regular query.
+Semantic search could be added for the word offers/
+
+start the front end
+Run this from web:
+pnpm dev

@@ -1,0 +1,24 @@
+{
+  "name": "secretary",
+  "private": true,
+  "scripts": {
+    "dev:agent": "pnpm --filter agent dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev:python": "uvicorn apps/python/main:app --reload --port 8000",
+    "build": "pnpm --filter agent build && pnpm --filter web build",
+    "lint": "pnpm --recursive lint",
+    "type-check": "pnpm --recursive type-check"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.8.0",
+    "@supabase/supabase-js": "^2.105.1"
+  },
+  "devDependencies": {
+    "@supabase/cli": "^1.0.0",
+    "@types/node": "^25.6.0",
+    "prisma": "^7.8.0",
+    "supabase": "^2.98.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}

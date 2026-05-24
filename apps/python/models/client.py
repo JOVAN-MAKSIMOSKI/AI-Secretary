@@ -1,0 +1,32 @@
+"""Pydantic models for /clients endpoints."""
+
+from datetime import datetime
+from pydantic import BaseModel, Field
+
+
+class ClientCreateRequest(BaseModel):
+    tenant_id: str = Field(description="Tenant auth user ID (owner_auth_id)")
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=3, max_length=254)
+    phone: str | None = Field(default=None, max_length=30)
+    address: str | None = Field(default=None, max_length=255)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class ClientUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=3, max_length=254)
+    phone: str | None = Field(default=None, max_length=30)
+    address: str | None = Field(default=None, max_length=255)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class ClientResponse(BaseModel):
+    id: str
+    tenant_id: str
+    name: str
+    email: str
+    phone: str | None = None
+    address: str | None = None
+    notes: str | None = None
+    created_at: datetime | None = None

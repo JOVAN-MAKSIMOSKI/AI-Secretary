@@ -1,0 +1,26 @@
+# Web framework
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+httpx==0.28.1
+
+# Environment
+python-dotenv==1.0.1
+
+# Supabase
+supabase==2.15.1
+
+# Document generation
+openpyxl==3.1.5
+python-docx==1.2.0
+
+# Speech to text
+faster-whisper==1.2.1
+
+# RAG
+llama-index==0.14.21
+llama-index-core==0.14.21
+llama-index-vector-stores-supabase==0.5.0
+llama-index-embeddings-openai==0.6.0
+llama-index-llms-openai==0.7.7
+llama-index-instrumentation==0.5.0
+llama-index-workflows==2.20.0

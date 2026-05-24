@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["public"]
+}
+
+model clients {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String     @db.Uuid
+  name       String
+  email      String
+  phone      String?
+  address    String?
+  notes      String?
+  created_at DateTime   @default(now()) @db.Timestamptz(6)
+  businesses businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+  invoices   invoices[]
+  offers     offers[]
+
+  @@index([tenant_id])
+  @@schema("public")
+}
+
+model invoices {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id   String     @db.Uuid
+  client_id   String     @default(uuid()) @db.Uuid
+  title       String
+  status      String     @default("draft")
+  file_url    String?
+  template_id String?    @db.Uuid
+  amount      Decimal?   @db.Decimal(10, 2)
+  due_date    DateTime?  @db.Timestamptz(6)
+  sent_at     DateTime?  @db.Timestamptz(6)
+  paid_at     DateTime?  @db.Timestamptz(6)
+  storagePath String   @unique
+  sizeBytes   BigInt?
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+  clients     clients    @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  templates   templatesInvoice? @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  businesses  businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([client_id])
+  @@index([tenant_id])
+  @@schema("public")
+}
+model offers {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id   String     @db.Uuid
+  client_id   String     @default(uuid()) @db.Uuid
+  title       String
+  status      String     @default("draft")
+  file_url    String?
+  template_id String?    @db.Uuid
+  amount      Decimal?   @db.Decimal(10, 2)
+  due_date    DateTime?  @db.Timestamptz(6)
+  sent_at     DateTime?  @db.Timestamptz(6)
+  paid_at     DateTime?  @db.Timestamptz(6)
+  storagePath String   @unique
+  sizeBytes   BigInt?
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+  clients     clients    @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  templates   templatesOffer? @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  businesses  businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([client_id])
+  @@index([tenant_id])
+  @@schema("public")
+}
+
+model templatesOffer {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String     @db.Uuid
+  name       String
+  content    String
+  storagePath String   @unique
+  sizeBytes   BigInt?
+  type       String
+  created_at DateTime   @default(now()) @db.Timestamptz(6)
+  offers     offers[]
+  businesses businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id])
+  @@schema("public")
+}
+
+model templatesInvoice {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String     @db.Uuid
+  name       String
+  content    String
+  storagePath String   @unique
+  sizeBytes   BigInt?
+  type       String
+  created_at DateTime   @default(now()) @db.Timestamptz(6)
+  invoices   invoices[]
+  businesses businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id])
+  @@schema("public")
+}
+
+model businesses {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_auth_id String     @unique @db.Uuid
+  name          String
+  email         String     @unique
+  phone         String?
+  address       String?
+  logo_url      String?
+  plan          String     @default("free")
+  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  clients       clients[]
+  invoices      invoices[]
+  templatesInvoice  templatesInvoice[]
+  templatesOffer    templatesOffer[]
+  offers        offers[]
+
+
+  @@schema("public")
+}
