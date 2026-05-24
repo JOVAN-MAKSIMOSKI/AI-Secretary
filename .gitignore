@@ -18,3 +18,6 @@ apps/**/.env
 # Local virtual environments
 apps/python/venv/
 **/venv/
+
+# Supabase local temp metadata
+supabase/.temp/
