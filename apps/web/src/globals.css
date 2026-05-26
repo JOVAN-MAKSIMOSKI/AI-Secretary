@@ -1,4 +1,60 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+	--brand-ink: #0f1923;
+	--brand-slate: #1e2530;
+	--brand-teal: #3d9e8c;
+	--brand-teal-soft: #eaf6f3;
+	--brand-surface: #f7f8fa;
+	--brand-card: #ffffff;
+	--brand-border: #e8ecf0;
+	--brand-text-muted: #6b7a8d;
+	--brand-warning-bg: #fef3dc;
+	--brand-warning-text: #8a5a0a;
+	--brand-danger-bg: #feecec;
+	--brand-danger-text: #8a1a1a;
+}
+
+html,
+body,
+#root {
+	height: 100%;
+}
+
+body {
+	font-family: "Inter", sans-serif;
+	background: radial-gradient(circle at top left, #ffffff 0%, var(--brand-surface) 45%, #eef2f4 100%);
+	color: var(--brand-ink);
+}
+
+.font-mono,
+code,
+pre {
+	font-family: "JetBrains Mono", monospace;
+}
+
+.fc .fc-button-primary {
+	background-color: var(--brand-teal);
+	border-color: var(--brand-teal);
+}
+
+.fc .fc-button-primary:hover,
+.fc .fc-button-primary:focus {
+	background-color: #2f8575;
+	border-color: #2f8575;
+}
+
+.fc .fc-button-primary:disabled {
+	background-color: #8fc8bc;
+	border-color: #8fc8bc;
+}
+
+.fc .fc-toolbar-title {
+	color: var(--brand-ink);
+	font-size: 1.1rem;
+	font-weight: 500;
+}

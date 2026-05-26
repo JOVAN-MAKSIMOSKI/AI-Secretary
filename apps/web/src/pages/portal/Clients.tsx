@@ -19,6 +19,10 @@ type ClientRow = {
   created_at: string | null;
 };
 
+function normalizeClientName(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 export default function Clients() {
   const tenantId = useSessionStore((state) => state.tenantId);
   const userEmail = useAppContextStore((state) => state.userEmail);
@@ -47,6 +51,10 @@ export default function Clients() {
   const [submittingEditClient, setSubmittingEditClient] = useState(false);
   const tenantIdentifier = tenantId;
   const isResolvingTenant = appLoading && !tenantIdentifier;
+  const normalizedInputName = normalizeClientName(name);
+  const duplicateNameExists = clients.some(
+    (client) => normalizeClientName(client.name) === normalizedInputName
+  );
 
   useEffect(() => {
     const closeMenuOnOutsideClick = (event: MouseEvent) => {
@@ -76,6 +84,11 @@ export default function Clients() {
 
     if (!tenantIdentifier) {
       setClientError("Tenant ID is still loading. Try again in a moment.");
+      return;
+    }
+
+    if (duplicateNameExists) {
+      setClientError("A client with the same name already exists for this tenant.");
       return;
     }
 
@@ -222,12 +235,12 @@ export default function Clients() {
   };
 
   return (
-    <section className="m-2 space-y-5 md:m-3">
+    <section className="m-2 space-y-5 text-[var(--brand-ink)] md:m-3">
       <header>
-        <h1 className="text-xl font-semibold text-slate-950">Clients</h1>
-        <p className="mt-1 text-sm text-slate-600">All clients under your tenant.</p>
-        <p className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-500">
-          Tenant ID: <span className="font-mono text-slate-700">{tenantIdentifier ?? "Loading..."}</span>
+        <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--brand-ink)]">Clients</h1>
+        <p className="mt-1 text-sm text-[var(--brand-text-muted)]">All clients under your tenant.</p>
+        <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-[var(--brand-text-muted)]">
+          Tenant ID: <span className="font-mono text-[var(--brand-ink)]">{tenantIdentifier ?? "Loading..."}</span>
         </p>
         <div className="mt-4 flex justify-end">
           <button
@@ -238,7 +251,7 @@ export default function Clients() {
               setIsDialogOpen(true);
             }}
             disabled={!tenantIdentifier}
-            className="inline-flex h-10 items-center justify-center bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+            className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--brand-teal)] px-4 text-sm font-medium text-white transition hover:bg-[#2f8575] disabled:cursor-not-allowed disabled:opacity-70"
           >
             Quick Add Client
           </button>
@@ -246,30 +259,30 @@ export default function Clients() {
       </header>
 
       {isDialogOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="w-full max-w-2xl border border-slate-200 bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,25,35,0.45)] p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-4 shadow-xl shadow-slate-900/20">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">Quick Add Client</h2>
-                <p className="mt-1 text-[13px] text-slate-600">
+                <h2 className="text-lg font-medium text-[var(--brand-ink)]">Quick Add Client</h2>
+                <p className="mt-1 text-[13px] text-[var(--brand-text-muted)]">
                   Create a client without leaving this page.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsDialogOpen(false)}
-                className="h-9 border border-slate-300 px-3 text-sm text-slate-700 transition hover:border-slate-900 hover:text-slate-900"
+                className="h-9 rounded-md border border-[var(--brand-border)] px-3 text-sm text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)]"
               >
                 Close
               </button>
             </div>
 
-            <p className="mb-4 text-[11px] text-slate-500">{userEmail ?? "Unknown"} · {tenantIdentifier ?? "Loading..."}</p>
+            <p className="mb-4 text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"} · {tenantIdentifier ?? "Loading..."}</p>
 
             <form onSubmit={handleCreateClient} className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Name</span>
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Name</span>
                   <input
                     type="text"
                     value={name}
@@ -277,13 +290,13 @@ export default function Clients() {
                     minLength={1}
                     maxLength={120}
                     placeholder="Client name"
-                    className="h-11 w-full border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-900"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                     required
                   />
                 </label>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Email</span>
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Email</span>
                   <input
                     type="email"
                     value={email}
@@ -291,7 +304,7 @@ export default function Clients() {
                     minLength={3}
                     maxLength={254}
                     placeholder="client@example.com"
-                    className="h-11 w-full border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-900"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                     required
                   />
                 </label>
@@ -299,50 +312,56 @@ export default function Clients() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Phone optional</span>
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Phone optional</span>
                   <input
                     type="tel"
                     value={phone}
                     onChange={(event) => setPhone(event.target.value)}
                     maxLength={30}
                     placeholder="+1 555 123 4567"
-                    className="h-11 w-full border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-900"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                   />
                 </label>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Address optional</span>
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Address optional</span>
                   <input
                     type="text"
                     value={address}
                     onChange={(event) => setAddress(event.target.value)}
                     maxLength={255}
                     placeholder="Street, city, country"
-                    className="h-11 w-full border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-900"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                   />
                 </label>
               </div>
 
               <label className="block space-y-2">
-                <span className="text-sm font-medium text-slate-700">Notes optional</span>
+                <span className="text-sm font-medium text-[var(--brand-ink)]">Notes optional</span>
                 <textarea
                   value={notes}
                   onChange={(event) => setNotes(event.target.value)}
                   maxLength={1000}
                   rows={3}
                   placeholder="Any context for this client"
-                  className="w-full border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-900"
+                  className="w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 py-3 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                 />
               </label>
 
               {clientError ? (
-                <div className="border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <div className="rounded-lg border border-[#f7cccc] bg-[var(--brand-danger-bg)] px-4 py-3 text-sm text-[var(--brand-danger-text)]">
                   {clientError}
                 </div>
               ) : null}
 
+              {!clientError && duplicateNameExists ? (
+                <div className="rounded-lg border border-[#f7e0b6] bg-[var(--brand-warning-bg)] px-4 py-3 text-sm text-[var(--brand-warning-text)]">
+                  A client with this name already exists for this tenant.
+                </div>
+              ) : null}
+
               {clientSuccess ? (
-                <div className="border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                <div className="rounded-lg border border-[#cdeade] bg-[var(--brand-teal-soft)] px-4 py-3 text-sm text-[#1a6b5a]">
                   {clientSuccess}
                 </div>
               ) : null}
@@ -351,14 +370,14 @@ export default function Clients() {
                 <button
                   type="button"
                   onClick={() => setIsDialogOpen(false)}
-                  className="inline-flex h-11 items-center justify-center border border-slate-300 px-5 text-sm font-medium text-slate-700 transition hover:border-slate-900 hover:text-slate-900"
+                  className="inline-flex h-11 items-center justify-center rounded-lg border border-[var(--brand-border)] px-5 text-sm font-medium text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={submittingClient || !tenantIdentifier}
-                  className="inline-flex h-11 items-center justify-center bg-slate-950 px-5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={submittingClient || !tenantIdentifier || duplicateNameExists}
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[var(--brand-teal)] px-5 text-sm font-medium text-white transition hover:bg-[#2f8575] disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {submittingClient ? "Creating client..." : "Create client"}
                 </button>
@@ -369,30 +388,30 @@ export default function Clients() {
       ) : null}
 
       {isEditDialogOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="w-full max-w-2xl border border-slate-200 bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,25,35,0.45)] p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-4 shadow-xl shadow-slate-900/20">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">Edit Client</h2>
-                <p className="mt-1 text-[13px] text-slate-600">
+                <h2 className="text-lg font-medium text-[var(--brand-ink)]">Edit Client</h2>
+                <p className="mt-1 text-[13px] text-[var(--brand-text-muted)]">
                   Update client details without leaving this page.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={closeEditDialog}
-                className="h-9 border border-slate-300 px-3 text-sm text-slate-700 transition hover:border-slate-900 hover:text-slate-900"
+                className="h-9 rounded-md border border-[var(--brand-border)] px-3 text-sm text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)]"
               >
                 Close
               </button>
             </div>
 
-            <p className="mb-4 text-[11px] text-slate-500">{userEmail ?? "Unknown"} · {tenantIdentifier ?? "Loading..."}</p>
+            <p className="mb-4 text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"} · {tenantIdentifier ?? "Loading..."}</p>
 
             <form onSubmit={handleEditClient} className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Name</span>
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Name</span>
                   <input
                     type="text"
                     value={editName}
@@ -400,13 +419,13 @@ export default function Clients() {
                     minLength={1}
                     maxLength={120}
                     placeholder="Client name"
-                    className="h-11 w-full border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-900"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                     required
                   />
                 </label>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Email</span>
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Email</span>
                   <input
                     type="email"
                     value={editEmail}
@@ -414,7 +433,7 @@ export default function Clients() {
                     minLength={3}
                     maxLength={254}
                     placeholder="client@example.com"
-                    className="h-11 w-full border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-900"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                     required
                   />
                 </label>
@@ -422,44 +441,44 @@ export default function Clients() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Phone optional</span>
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Phone optional</span>
                   <input
                     type="tel"
                     value={editPhone}
                     onChange={(event) => setEditPhone(event.target.value)}
                     maxLength={30}
                     placeholder="+1 555 123 4567"
-                    className="h-11 w-full border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-900"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                   />
                 </label>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-700">Address optional</span>
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Address optional</span>
                   <input
                     type="text"
                     value={editAddress}
                     onChange={(event) => setEditAddress(event.target.value)}
                     maxLength={255}
                     placeholder="Street, city, country"
-                    className="h-11 w-full border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-slate-900"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                   />
                 </label>
               </div>
 
               <label className="block space-y-2">
-                <span className="text-sm font-medium text-slate-700">Notes optional</span>
+                <span className="text-sm font-medium text-[var(--brand-ink)]">Notes optional</span>
                 <textarea
                   value={editNotes}
                   onChange={(event) => setEditNotes(event.target.value)}
                   maxLength={1000}
                   rows={3}
                   placeholder="Any context for this client"
-                  className="w-full border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-900"
+                  className="w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 py-3 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                 />
               </label>
 
               {clientError ? (
-                <div className="border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <div className="rounded-lg border border-[#f7cccc] bg-[var(--brand-danger-bg)] px-4 py-3 text-sm text-[var(--brand-danger-text)]">
                   {clientError}
                 </div>
               ) : null}
@@ -468,14 +487,14 @@ export default function Clients() {
                 <button
                   type="button"
                   onClick={closeEditDialog}
-                  className="inline-flex h-11 items-center justify-center border border-slate-300 px-5 text-sm font-medium text-slate-700 transition hover:border-slate-900 hover:text-slate-900"
+                  className="inline-flex h-11 items-center justify-center rounded-lg border border-[var(--brand-border)] px-5 text-sm font-medium text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submittingEditClient || !tenantIdentifier || !editingClientId}
-                  className="inline-flex h-11 items-center justify-center bg-slate-950 px-5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[var(--brand-teal)] px-5 text-sm font-medium text-white transition hover:bg-[#2f8575] disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {submittingEditClient ? "Saving..." : "Save changes"}
                 </button>
@@ -486,36 +505,36 @@ export default function Clients() {
       ) : null}
 
       {isResolvingTenant || loadingClients ? (
-        <div className="border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+        <div className="rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 py-3 text-sm text-[var(--brand-text-muted)]">
           Loading clients...
         </div>
       ) : null}
 
       {!appLoading && !tenantIdentifier ? (
-        <div className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        <div className="rounded-lg border border-[#f7e0b6] bg-[var(--brand-warning-bg)] px-4 py-3 text-sm text-[var(--brand-warning-text)]">
           No business profile was found for this account yet.
         </div>
       ) : null}
 
       {error ? (
-        <div className="border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+        <div className="rounded-lg border border-[#f7cccc] bg-[var(--brand-danger-bg)] px-4 py-3 text-sm text-[var(--brand-danger-text)]">{error}</div>
       ) : null}
 
       {!loadingClients && !error && tenantIdentifier ? (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_14px_40px_-28px_rgba(15,23,42,0.6)]">
-          <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-5 py-4">
+        <div className="overflow-hidden rounded-xl border border-[var(--brand-border)] bg-[var(--brand-card)] shadow-sm shadow-slate-200/50">
+          <div className="flex items-center justify-between border-b border-[var(--brand-border)] bg-[var(--brand-surface)] px-5 py-4">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-700">Client Directory</h2>
-              <p className="mt-1 text-xs text-slate-500">Manage contacts, details, and onboarding context.</p>
+              <h2 className="text-sm font-medium uppercase tracking-[0.14em] text-[var(--brand-ink)]">Client Directory</h2>
+              <p className="mt-1 text-xs text-[var(--brand-text-muted)]">Manage contacts, details, and onboarding context.</p>
             </div>
-            <div className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700">
+            <div className="rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] px-3 py-1 text-xs font-medium text-[var(--brand-text-muted)]">
               {clients.length} {clients.length === 1 ? "client" : "clients"}
             </div>
           </div>
 
           <div className="overflow-x-auto">
             <div className="min-w-[800px]">
-              <div className="grid grid-cols-[33%_29%_20%_12%_6%] border-b border-slate-200 bg-slate-50/80 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <div className="grid grid-cols-[33%_29%_20%_12%_6%] border-b border-[var(--brand-border)] bg-[#f9fbfc] text-left text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--brand-text-muted)]">
                 <span className="px-5 py-3">Client</span>
                 <span className="px-5 py-3">Email</span>
                 <span className="px-5 py-3">Phone</span>
@@ -525,40 +544,40 @@ export default function Clients() {
 
               <div className="max-h-[20rem] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 {clients.length === 0 ? (
-                  <div className="px-5 py-10 text-center text-sm text-slate-500">No clients found for this tenant.</div>
+                  <div className="px-5 py-10 text-center text-sm text-[var(--brand-text-muted)]">No clients found for this tenant.</div>
                 ) : (
                   clients.map((client) => (
                     <div
                       key={client.id}
-                      className="grid h-16 grid-cols-[33%_29%_20%_12%_6%] border-b border-slate-100 text-sm text-slate-800 transition hover:bg-slate-50/70 last:border-b-0"
+                      className="grid h-16 grid-cols-[33%_29%_20%_12%_6%] border-b border-[#eef2f4] text-sm text-[var(--brand-ink)] transition hover:bg-[var(--brand-surface)]/80 last:border-b-0"
                     >
                       <div className="px-5 py-4">
                         <div className="flex items-start gap-3">
-                          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-xs font-semibold uppercase text-slate-700">
+                          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#cdeade] bg-[var(--brand-teal-soft)] text-xs font-semibold uppercase text-[#1a6b5a]">
                             {client.name.slice(0, 2)}
                           </span>
                           <div className="min-w-0">
-                            <p className="truncate font-semibold text-slate-900">{client.name}</p>
-                            <p className="mt-0.5 truncate text-xs text-slate-500">{client.address ?? "No address yet"}</p>
+                            <p className="truncate font-medium text-[var(--brand-ink)]">{client.name}</p>
+                            <p className="mt-0.5 truncate text-xs text-[var(--brand-text-muted)]">{client.address ?? "No address yet"}</p>
                           </div>
                         </div>
                       </div>
 
                       <div className="px-5 py-4">
-                        <p className="truncate font-medium text-slate-700">{client.email}</p>
+                        <p className="truncate font-medium text-[var(--brand-ink)]">{client.email}</p>
                       </div>
 
                       <div className="px-5 py-4">
                         {client.phone ? (
-                          <span className="inline-flex rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
+                          <span className="inline-flex rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] px-2.5 py-1 text-xs font-medium text-[var(--brand-text-muted)]">
                             {client.phone}
                           </span>
                         ) : (
-                          <span className="text-slate-400">-</span>
+                          <span className="text-[#a3afbd]">-</span>
                         )}
                       </div>
 
-                      <div className="px-5 py-4 text-slate-500">
+                      <div className="px-5 py-4 text-[var(--brand-text-muted)]">
                         {client.created_at ? new Date(client.created_at).toLocaleDateString() : "-"}
                       </div>
 
@@ -572,18 +591,18 @@ export default function Clients() {
                             onClick={() => {
                               setActiveMenuClientId((current) => (current === client.id ? null : client.id));
                             }}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 transition hover:border-slate-900 hover:text-slate-900"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)]"
                           >
                             <MoreHorizontal size={15} />
                           </button>
                         </div>
 
                         {activeMenuClientId === client.id ? (
-                          <div data-client-menu className="absolute right-5 top-11 z-20 w-28 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+                          <div data-client-menu className="absolute right-5 top-11 z-20 w-28 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] p-1.5 shadow-lg shadow-slate-200/60">
                             <button
                               type="button"
                               onClick={() => openEditDialog(client)}
-                              className="flex w-full items-center justify-start rounded-lg px-2.5 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+                              className="flex w-full items-center justify-start rounded-md px-2.5 py-2 text-xs font-medium text-[var(--brand-ink)] transition hover:bg-[var(--brand-surface)]"
                             >
                               Edit
                             </button>
@@ -593,7 +612,7 @@ export default function Clients() {
                                 void handleDeleteClient(client);
                               }}
                               disabled={deletingClientId === client.id}
-                              className="flex w-full items-center justify-start rounded-lg px-2.5 py-2 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
+                              className="flex w-full items-center justify-start rounded-md px-2.5 py-2 text-xs font-medium text-[var(--brand-danger-text)] transition hover:bg-[var(--brand-danger-bg)]"
                             >
                               {deletingClientId === client.id ? "Deleting..." : "Delete"}
                             </button>

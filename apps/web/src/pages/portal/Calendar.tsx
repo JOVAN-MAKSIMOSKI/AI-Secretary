@@ -53,10 +53,10 @@ export default function Calendar() {
 
   return (
     <section className="m-2 h-full md:m-3">
-      <div className="h-full rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_14px_40px_-28px_rgba(15,23,42,0.6)] md:p-4">
-        <h1 className="mb-3 text-lg font-semibold text-slate-900">Calendar</h1>
+      <div className="h-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-3 shadow-sm shadow-slate-200/40 md:p-4">
+        <h1 className="mb-3 text-lg font-medium text-[var(--brand-ink)]">Calendar</h1>
 
-        <div className="h-[calc(100%-2.25rem)] min-h-[520px] rounded-xl border border-slate-200 bg-slate-50/40 p-2">
+        <div className="h-[calc(100%-2.25rem)] min-h-[520px] rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] p-2">
           <FullCalendar
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
             initialView="dayGridMonth"

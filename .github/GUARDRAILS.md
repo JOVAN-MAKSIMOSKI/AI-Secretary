@@ -2,6 +2,7 @@
 
 ## Mandatory Constraints
 WORKFLOW INSTRUCTION (COPILOT): In every single message, include the current status of any terminal process running on your side.
+Never use secrets directly in the code, always use env variables!
 ### Database & Multi-Tenancy
 - ❌ Never write raw SQL — use Prisma in TypeScript
 - ❌ Never skip `tenant_id` filter on any database query

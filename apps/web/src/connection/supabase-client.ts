@@ -91,6 +91,16 @@ export type BusinessRegisterResponse = {
   created_at: string | null;
 };
 
+export type DocumentTemplateResponse = {
+  id: string;
+  tenant_id: string;
+  title: string;
+  status: string;
+  file_url: string | null;
+  storage_path: string;
+  created_at: string;
+};
+
 export async function createClientProfile(payload: ClientCreateRequest): Promise<ClientResponse> {
   const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients`, {
     method: "POST",
@@ -208,6 +218,41 @@ export async function registerBusinessAccount(
   }
 
   return (await response.json()) as BusinessRegisterResponse;
+}
+
+export async function uploadDocumentTemplate(payload: {
+  tenantId: string;
+  name: string;
+  docType: "invoice" | "offer";
+  extension: "xlsx" | "docx";
+  file: File;
+}): Promise<DocumentTemplateResponse> {
+  const formData = new FormData();
+  formData.append("tenant_id", payload.tenantId);
+  formData.append("name", payload.name);
+  formData.append("doc_type", payload.docType);
+  formData.append("extension", payload.extension);
+  formData.append("file", payload.file);
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/documents/template`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    let detail = "Failed to upload template.";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        detail = data.detail;
+      }
+    } catch {
+      // Keep fallback error message when response body is not JSON.
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as DocumentTemplateResponse;
 }
 
 export async function signInWithPasswordGrant(email: string, password: string) {

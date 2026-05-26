@@ -12,6 +12,7 @@ class InvoiceRequest(BaseModel):
     title: str
     amount: Optional[float] = None
     due_date: Optional[datetime] = None
+    template_id: Optional[str] = None
 
 
 class OfferRequest(BaseModel):

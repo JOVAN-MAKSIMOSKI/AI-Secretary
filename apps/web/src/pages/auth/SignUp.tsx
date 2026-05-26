@@ -71,23 +71,23 @@ export default function SignUp() {
 	};
 
 	return (
-		<main className="min-h-screen bg-[radial-gradient(circle_at_top,_#f8f2e8,_#efe7da_45%,_#e1d6c4)] px-4 py-10 text-slate-900">
-			<div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-5xl overflow-hidden rounded-[2rem] border border-white/60 bg-white/70 shadow-[0_24px_80px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
-				<section className="hidden w-1/2 flex-col justify-between bg-slate-950 p-10 text-white lg:flex">
+		<main className="min-h-screen bg-[radial-gradient(circle_at_top,_#ffffff,_#f7f8fa_45%,_#eaf0f3)] px-4 py-10 text-[var(--brand-ink)]">
+			<div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-5xl overflow-hidden rounded-[2rem] border border-[var(--brand-border)] bg-[var(--brand-card)]/90 shadow-[0_24px_80px_-24px_rgba(15,25,35,0.24)] backdrop-blur">
+				<section className="hidden w-1/2 flex-col justify-between bg-[var(--brand-slate)] p-10 text-white lg:flex">
 					<div>
-						<p className="text-sm uppercase tracking-[0.35em] text-amber-300/90">AI Secretary</p>
-						<h1 className="mt-6 max-w-md text-5xl font-semibold leading-tight">
+						<p className="text-sm uppercase tracking-[0.35em] text-[#8ccdc1]">AI Secretary</p>
+						<h1 className="mt-6 max-w-md text-5xl font-medium leading-tight tracking-[-0.02em]">
 							Create your workspace.
 							<br />
 							Get started in seconds.
 						</h1>
-						<p className="mt-6 max-w-md text-base leading-7 text-slate-300">
+						<p className="mt-6 max-w-md text-base leading-7 text-[#b8c3d1]">
 							Add your business details so the assistant can identify your account and keep your
 							profile organized.
 						</p>
 					</div>
 
-					<div className="max-w-sm rounded-3xl border border-white/10 bg-white/5 p-6 text-sm leading-6 text-slate-300">
+					<div className="max-w-sm rounded-2xl border border-white/10 bg-white/5 p-6 text-sm leading-6 text-[#b8c3d1]">
 						Required fields: name, email, phone, and address. Logo URL is optional.
 					</div>
 				</section>
@@ -95,100 +95,100 @@ export default function SignUp() {
 				<section className="flex w-full items-center justify-center p-6 sm:p-10 lg:w-1/2">
 					<form onSubmit={handleSubmit} className="w-full max-w-md space-y-6">
 						<div>
-							<p className="text-sm font-medium uppercase tracking-[0.3em] text-slate-500">Sign up</p>
-							<h2 className="mt-3 text-3xl font-semibold text-slate-950">Create your account</h2>
-							<p className="mt-2 text-sm leading-6 text-slate-600">
+							<p className="text-sm font-medium uppercase tracking-[0.3em] text-[var(--brand-text-muted)]">Sign up</p>
+							<h2 className="mt-3 text-3xl font-medium tracking-[-0.02em] text-[var(--brand-ink)]">Create your account</h2>
+							<p className="mt-2 text-sm leading-6 text-[var(--brand-text-muted)]">
 								Fill in your details to set up your profile.
 							</p>
 						</div>
 
-						<div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+						<div className="space-y-4 rounded-2xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-6 shadow-sm">
 							<label className="block space-y-2">
-								<span className="text-sm font-medium text-slate-700">Password</span>
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Password</span>
 								<input
 									type="password"
 									autoComplete="new-password"
 									value={password}
 									onChange={(event) => setPassword(event.target.value)}
 									placeholder="Create a password"
-									className="h-12 w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 text-sm outline-none transition focus:border-slate-900 focus:bg-white"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
 									required
 								/>
 							</label>
 
 							<label className="block space-y-2">
-								<span className="text-sm font-medium text-slate-700">Confirm Password</span>
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Confirm Password</span>
 								<input
 									type="password"
 									autoComplete="new-password"
 									value={confirmPassword}
 									onChange={(event) => setConfirmPassword(event.target.value)}
 									placeholder="Repeat your password"
-									className="h-12 w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 text-sm outline-none transition focus:border-slate-900 focus:bg-white"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
 									required
 								/>
 							</label>
 
 							<label className="block space-y-2">
-								<span className="text-sm font-medium text-slate-700">Name</span>
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Name</span>
 								<input
 									type="text"
 									autoComplete="name"
 									value={name}
 									onChange={(event) => setName(event.target.value)}
 									placeholder="Your full name"
-									className="h-12 w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 text-sm outline-none transition focus:border-slate-900 focus:bg-white"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
 									required
 								/>
 							</label>
 
 							<label className="block space-y-2">
-								<span className="text-sm font-medium text-slate-700">Email</span>
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Email</span>
 								<input
 									type="email"
 									autoComplete="email"
 									value={email}
 									onChange={(event) => setEmail(event.target.value)}
 									placeholder="you@example.com"
-									className="h-12 w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 text-sm outline-none transition focus:border-slate-900 focus:bg-white"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
 									required
 								/>
 							</label>
 
 							<label className="block space-y-2">
-								<span className="text-sm font-medium text-slate-700">Phone</span>
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Phone</span>
 								<input
 									type="tel"
 									autoComplete="tel"
 									value={phone}
 									onChange={(event) => setPhone(event.target.value)}
 									placeholder="+1 555 123 4567"
-									className="h-12 w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 text-sm outline-none transition focus:border-slate-900 focus:bg-white"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
 									required
 								/>
 							</label>
 
 							<label className="block space-y-2">
-								<span className="text-sm font-medium text-slate-700">Address</span>
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Address</span>
 								<textarea
 									value={address}
 									onChange={(event) => setAddress(event.target.value)}
 									placeholder="Street, city, state, country"
 									rows={4}
-									className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-900 focus:bg-white"
+									className="w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 py-3 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
 									required
 								/>
 							</label>
 
 							<label className="block space-y-2">
-								<span className="text-sm font-medium text-slate-700">Logo URL optional</span>
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Logo URL optional</span>
 								<input
 									type="url"
 									autoComplete="url"
 									value={logoUrl}
 									onChange={(event) => setLogoUrl(event.target.value)}
 									placeholder="https://example.com/logo.png"
-									className="h-12 w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 text-sm outline-none transition focus:border-slate-900 focus:bg-white"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
 								/>
 							</label>
 
@@ -207,14 +207,14 @@ export default function SignUp() {
 							<button
 								type="submit"
 								disabled={loading}
-								className="inline-flex h-12 w-full items-center justify-center rounded-2xl bg-slate-950 px-5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+								className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-[var(--brand-teal)] px-5 text-sm font-medium text-white transition hover:bg-[#2f8575] disabled:cursor-not-allowed disabled:opacity-70"
 							>
 								{loading ? "Creating account..." : "Create account"}
 							</button>
 
-							<div className="flex items-center justify-between text-sm text-slate-500">
+							<div className="flex items-center justify-between text-sm text-[var(--brand-text-muted)]">
 								<span>Already have an account?</span>
-								<Link to="/login" className="font-medium text-slate-900 hover:underline">
+								<Link to="/login" className="font-medium text-[var(--brand-ink)] hover:text-[var(--brand-teal)] hover:underline">
 									Sign in
 								</Link>
 							</div>

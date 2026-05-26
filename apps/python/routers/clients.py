@@ -9,6 +9,10 @@ from services.storage import supabase
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
+def _normalize_client_name(name: str) -> str:
+    return " ".join(name.strip().split()).casefold()
+
+
 def require_tenant_owner_auth_id(tenant_identifier: str) -> str:
     # Canonical tenant identity is the authenticated user id (owner_auth_id).
     business = (
@@ -31,6 +35,26 @@ def require_tenant_owner_auth_id(tenant_identifier: str) -> str:
 @router.post("", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
 def create_client(payload: ClientCreateRequest) -> ClientResponse:
     owner_auth_id = require_tenant_owner_auth_id(payload.tenant_id)
+    normalized_name = _normalize_client_name(payload.name)
+
+    # Prevent duplicate client names under the same tenant.
+    existing_clients = (
+        supabase.table("clients")
+        .select("id, name")
+        .eq("tenant_id", owner_auth_id)
+        .execute()
+    )
+    existing_rows = existing_clients.data or []
+    has_duplicate_name = any(
+        _normalize_client_name(str(row.get("name", ""))) == normalized_name
+        for row in existing_rows
+    )
+
+    if has_duplicate_name:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Client name '{payload.name.strip()}' already exists for this tenant.",
+        )
 
     try:
         response = (
@@ -38,7 +62,7 @@ def create_client(payload: ClientCreateRequest) -> ClientResponse:
             .insert(
                 {
                     "tenant_id": owner_auth_id,
-                    "name": payload.name,
+                    "name": payload.name.strip(),
                     "email": payload.email,
                     "phone": payload.phone,
                     "address": payload.address,

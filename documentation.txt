@@ -1,13 +1,12 @@
-finish the UI.
+finish the UI (find complementary colour pallet and implement the UI features.).
 
 
-implement excel logic!
+implement excel logic(claude contains the prompt)!
 there is a logic about the calendar functionality in the pinned chat.
-every package is downloaded and the setup from claude is completed, start implementing langchain logic (LCEL chains) once excel and word files are set up completely.
-add auth from supabase and RLS security
+ensure RLS security is set up properly
 add indexes for performance when querying
 2 clients can be created under the same tennant with the same email!
-think of a new UI?
+consider adding a stronger LLM once finishing the app because request in macedonian might be a problem for the current ollama model.
 
 *Add system prompts in the routers (or a dedicated services/prompts.py file) where you know the context.
 For example, when you implement routers/rag.py, the RAG-specific system prompt lives there. A document generation prompt lives in routers/documents.py. That way each feature owns its own instructions and langchain.py stays reusable.
@@ -18,7 +17,8 @@ Implement security for prompt injection!
 
 
 
-
+Summary of what needs fixing
+FunctionCurrentProblemcreateClientProfilePOST to FastAPI, tenant_id in bodyNo auth, spoofablegetClientsByTenantGET to FastAPI, tenantId in URLNo auth, spoofabledeleteClientByIdDELETE to FastAPI, tenantId in URLNo auth, spoofableupdateClientByIdPUT to FastAPI, tenantId in URLNo auth, spoofableuploadDocumentTemplatePOST to FastAPI, tenant_id in FormDataNo auth, spoofablecreateBusinessProfileDirect Supabase DB writeBypasses agent layergetUserBusinessDirect Supabase DB readBypasses agent layersignInWithPasswordGrantSupabase Auth✅ correct
 
 
 FRONT END 

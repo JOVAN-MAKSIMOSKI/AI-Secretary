@@ -1,17 +1,17 @@
 """Document generation router for invoices, offers, and templates."""
 
-from fastapi import APIRouter, HTTPException, status, UploadFile, Form, File
+from io import BytesIO
 from typing import Optional
-from uuid import uuid4, UUID
+from uuid import UUID, uuid4
 from datetime import datetime
 
+from fastapi import APIRouter, HTTPException, status, UploadFile, Form, File
+from fastapi.responses import StreamingResponse
+
 from models.documents import DocumentResponse
-from services.excel import create_basic_workbook_bytes
-from services.word import create_basic_document_bytes
+from services.excel import fetch_invoice_template_payload, fetch_offer_template_payload
 from services.storage import (
     supabase,
-    upload_invoice_document,
-    upload_offer_document,
     upload_template_document,
 )
 
@@ -36,205 +36,83 @@ def _parse_optional_due_date(raw_due_date: Optional[str]) -> Optional[datetime]:
         ) from exc
 
 
-@router.post("/invoice", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/invoice", status_code=status.HTTP_200_OK)
 def create_invoice(
-    tenant_id: UUID = Form(...),
-    client_id: UUID = Form(...),
-    title: str = Form(...),
-    amount: Optional[float] = Form(None),
-    due_date: Optional[str] = Form(None),
-) -> DocumentResponse:
-    """Upload and save an invoice document."""
-    tenant_id_str = str(tenant_id)
-    client_id_str = str(client_id)
-    parsed_due_date = _parse_optional_due_date(due_date)
+    owner_auth_id: UUID = Form(...),
+) -> StreamingResponse:
+    """Fetch the stored invoice template bytes and stream them back."""
+    owner_auth_id_str = str(owner_auth_id)
 
     # Verify tenant exists by canonical tenant identity (owner_auth_id).
     business = (
         supabase.table("businesses")
         .select("id, owner_auth_id")
-        .eq("owner_auth_id", tenant_id_str)
+        .eq("owner_auth_id", owner_auth_id_str)
         .limit(1)
         .execute()
     )
     if not business.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant '{tenant_id_str}' not found.",
+            detail=f"Tenant '{owner_auth_id_str}' not found.",
         )
-    owner_auth_id = business.data[0]["owner_auth_id"]
-
-    # Verify client exists under this tenant
-    client = (
-        supabase.table("clients")
-        .select("id")
-        .eq("id", client_id_str)
-        .eq("tenant_id", owner_auth_id)
-        .limit(1)
-        .execute()
-    )
-    if not client.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Client '{client_id_str}' not found under tenant '{tenant_id_str}'.",
-        )
-
-    # Generate document ID and build invoice workbook content
-    document_id = str(uuid4())
-    file_content = create_basic_workbook_bytes(sheet_name="Invoice")
-
-    storage_path = f"{owner_auth_id}/invoices/{document_id}.xlsx"
-    inserted = False
-    data = []
+    resolved_owner_auth_id = business.data[0]["owner_auth_id"]
 
     try:
-        # Insert into database first so storage objects are not orphaned if DB write fails.
-        response = (
-            supabase.table("invoices")
-            .insert(
-                {
-                    "id": document_id,
-                    "tenant_id": owner_auth_id,
-                    "client_id": client_id_str,
-                    "title": title,
-                    "status": "draft",
-                    "amount": amount,
-                    "due_date": parsed_due_date.isoformat() if parsed_due_date else None,
-                    "storagePath": storage_path,
-                }
-            )
-            .execute()
+        template_payload = fetch_invoice_template_payload(
+            resolved_owner_auth_id,
         )
-
-        data = response.data or []
-        if not data:
-            raise ValueError("Invoice insert returned no data.")
-
-        inserted = True
-        upload_invoice_document(owner_auth_id, document_id, file_content)
-    except Exception as exc:
-        # Compensate by deleting inserted row if storage upload fails.
-        if inserted:
-            try:
-                supabase.table("invoices").delete().eq("id", document_id).execute()
-            except Exception:
-                pass
-
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create invoice: {exc}",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
         ) from exc
 
-    created = data[0]
-    return DocumentResponse(
-        id=created["id"],
-        tenant_id=created["tenant_id"],
-        title=created["title"],
-        status=created["status"],
-        file_url=created.get("file_url"),
-        storage_path=created["storagePath"],
-        created_at=created["created_at"],
+    filename = f"{template_payload['template_name']}.xlsx"
+    return StreamingResponse(
+        BytesIO(template_payload["template_bytes"]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
-@router.post("/offer", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/offer", status_code=status.HTTP_200_OK)
 def create_offer(
-    tenant_id: UUID = Form(...),
-    client_id: UUID = Form(...),
-    title: str = Form(...),
-    amount: Optional[float] = Form(None),
-    due_date: Optional[str] = Form(None),
-) -> DocumentResponse:
-    """Upload and save an offer document."""
-    tenant_id_str = str(tenant_id)
-    client_id_str = str(client_id)
-    parsed_due_date = _parse_optional_due_date(due_date)
+    owner_auth_id: UUID = Form(...),
+) -> StreamingResponse:
+    """Fetch the stored offer template bytes and stream them back."""
+    owner_auth_id_str = str(owner_auth_id)
 
     # Verify tenant exists by canonical tenant identity (owner_auth_id).
     business = (
         supabase.table("businesses")
         .select("id, owner_auth_id")
-        .eq("owner_auth_id", tenant_id_str)
+        .eq("owner_auth_id", owner_auth_id_str)
         .limit(1)
         .execute()
     )
     if not business.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tenant '{tenant_id_str}' not found.",
+            detail=f"Tenant '{owner_auth_id_str}' not found.",
         )
-    owner_auth_id = business.data[0]["owner_auth_id"]
-
-    # Verify client exists under this tenant
-    client = (
-        supabase.table("clients")
-        .select("id")
-        .eq("id", client_id_str)
-        .eq("tenant_id", owner_auth_id)
-        .limit(1)
-        .execute()
-    )
-    if not client.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Client '{client_id_str}' not found under tenant '{tenant_id_str}'.",
-        )
-
-    # Generate document ID and build offer document content
-    document_id = str(uuid4())
-    file_content = create_basic_document_bytes(doc_title=title)
-
-    storage_path = f"{owner_auth_id}/offers/{document_id}.docx"
-    inserted = False
-    data = []
+    resolved_owner_auth_id = business.data[0]["owner_auth_id"]
 
     try:
-        # Insert into database first so storage objects are not orphaned if DB write fails.
-        response = (
-            supabase.table("offers")
-            .insert(
-                {
-                    "id": document_id,
-                    "tenant_id": owner_auth_id,
-                    "client_id": client_id_str,
-                    "title": title,
-                    "status": "draft",
-                    "amount": amount,
-                    "due_date": parsed_due_date.isoformat() if parsed_due_date else None,
-                    "storagePath": storage_path,
-                }
-            )
-            .execute()
+        template_payload = fetch_offer_template_payload(
+            resolved_owner_auth_id,
         )
-
-        data = response.data or []
-        if not data:
-            raise ValueError("Offer insert returned no data.")
-
-        inserted = True
-        upload_offer_document(owner_auth_id, document_id, file_content)
-    except Exception as exc:
-        # Compensate by deleting inserted row if storage upload fails.
-        if inserted:
-            try:
-                supabase.table("offers").delete().eq("id", document_id).execute()
-            except Exception:
-                pass
-
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create offer: {exc}",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
         ) from exc
 
-    created = data[0]
-    return DocumentResponse(
-        id=created["id"],
-        tenant_id=created["tenant_id"],
-        title=created["title"],
-        status=created["status"],
-        file_url=created.get("file_url"),
-        storage_path=created["storagePath"],
-        created_at=created["created_at"],
+    filename = f"{template_payload['template_name']}.docx"
+    return StreamingResponse(
+        BytesIO(template_payload["template_bytes"]),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

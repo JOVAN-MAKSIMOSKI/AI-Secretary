@@ -66,6 +66,10 @@ DEFAULT_TIMEOUT_MS = 5000
   - `client_id` (references clients table)
 - **Boolean columns:** prefix with `is_` or `has_`
   - `is_active`, `has_approved`
+- **Tenant identity naming:** never confuse `tenant_id` with `owner_auth_id`
+  - `owner_auth_id` is the Supabase Auth user id used to resolve the business owner
+  - `tenant_id` is the business-scoped tenant key used for filtering, storage paths, and document ownership
+  - If both appear in the same flow, resolve `owner_auth_id` first and only then derive or validate the tenant-scoped identity
 
 ---
 
