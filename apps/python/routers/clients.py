@@ -1,9 +1,10 @@
-"""Clients router — POST /clients, GET /clients/{tenant_id}, PUT /clients/{tenant_id}/{client_id}, DELETE /clients/{tenant_id}/{client_id}."""
+"""Clients router secured by authenticated owner identity."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 
 from models.client import ClientCreateRequest, ClientResponse, ClientUpdateRequest
+from services.auth import get_current_user_id
 from services.storage import supabase
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -33,8 +34,11 @@ def require_tenant_owner_auth_id(tenant_identifier: str) -> str:
 
 
 @router.post("", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
-def create_client(payload: ClientCreateRequest) -> ClientResponse:
-    owner_auth_id = require_tenant_owner_auth_id(payload.tenant_id)
+def create_client(
+    payload: ClientCreateRequest,
+    current_user_id: str = Depends(get_current_user_id),
+) -> ClientResponse:
+    owner_auth_id = require_tenant_owner_auth_id(current_user_id)
     normalized_name = _normalize_client_name(payload.name)
 
     # Prevent duplicate client names under the same tenant.
@@ -97,9 +101,9 @@ def create_client(payload: ClientCreateRequest) -> ClientResponse:
     )
 
 
-@router.get("/{tenant_id}", response_model=List[ClientResponse], status_code=status.HTTP_200_OK)
-def get_clients_by_tenant(tenant_id: str) -> List[ClientResponse]:
-    owner_auth_id = require_tenant_owner_auth_id(tenant_id)
+@router.get("", response_model=List[ClientResponse], status_code=status.HTTP_200_OK)
+def get_clients_by_tenant(current_user_id: str = Depends(get_current_user_id)) -> List[ClientResponse]:
+    owner_auth_id = require_tenant_owner_auth_id(current_user_id)
 
     try:
         response = (
@@ -130,9 +134,13 @@ def get_clients_by_tenant(tenant_id: str) -> List[ClientResponse]:
     ]
 
 
-@router.put("/{tenant_id}/{client_id}", response_model=ClientResponse, status_code=status.HTTP_200_OK)
-def update_client_by_id(tenant_id: str, client_id: str, payload: ClientUpdateRequest) -> ClientResponse:
-    owner_auth_id = require_tenant_owner_auth_id(tenant_id)
+@router.put("/{client_id}", response_model=ClientResponse, status_code=status.HTTP_200_OK)
+def update_client_by_id(
+    client_id: str,
+    payload: ClientUpdateRequest,
+    current_user_id: str = Depends(get_current_user_id),
+) -> ClientResponse:
+    owner_auth_id = require_tenant_owner_auth_id(current_user_id)
 
     try:
         response = (
@@ -176,9 +184,12 @@ def update_client_by_id(tenant_id: str, client_id: str, payload: ClientUpdateReq
     )
 
 
-@router.delete("/{tenant_id}/{client_id}", status_code=status.HTTP_200_OK)
-def delete_client_by_id(tenant_id: str, client_id: str) -> dict:
-    owner_auth_id = require_tenant_owner_auth_id(tenant_id)
+@router.delete("/{client_id}", status_code=status.HTTP_200_OK)
+def delete_client_by_id(
+    client_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+) -> dict:
+    owner_auth_id = require_tenant_owner_auth_id(current_user_id)
 
     try:
         response = (

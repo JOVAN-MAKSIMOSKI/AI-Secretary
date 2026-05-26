@@ -95,7 +95,6 @@ export default function Clients() {
     setSubmittingClient(true);
     try {
       const created = await createClientProfile({
-        tenant_id: tenantIdentifier,
         name,
         email,
         phone: phone.trim() ? phone : null,
@@ -103,7 +102,7 @@ export default function Clients() {
         notes: notes.trim() ? notes : null,
       });
 
-      const data = await getClientsByTenant(tenantIdentifier);
+      const data = await getClientsByTenant();
       setClients(data);
       setClientSuccess(`Client ${created.name} created successfully.`);
       setName("");
@@ -130,7 +129,7 @@ export default function Clients() {
       setLoadingClients(true);
       setError("");
       try {
-        const data = await getClientsByTenant(tenantIdentifier);
+        const data = await getClientsByTenant();
         if (isMounted) {
           setClients(data);
         }
@@ -168,7 +167,7 @@ export default function Clients() {
     setDeletingClientId(client.id);
 
     try {
-      await deleteClientById(tenantIdentifier, client.id);
+      await deleteClientById(client.id);
       setClients((current) => current.filter((item) => item.id !== client.id));
       setClientSuccess(`Client ${client.name} deleted.`);
       setActiveMenuClientId(null);
@@ -213,7 +212,7 @@ export default function Clients() {
     setSubmittingEditClient(true);
 
     try {
-      const updated = await updateClientById(tenantIdentifier, editingClientId, {
+      const updated = await updateClientById(editingClientId, {
         name: editName,
         email: editEmail,
         phone: editPhone.trim() ? editPhone : null,

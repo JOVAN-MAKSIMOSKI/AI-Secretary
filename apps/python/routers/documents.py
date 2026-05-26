@@ -5,11 +5,12 @@ from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, status, UploadFile, Form, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
 
 from models.documents import DocumentResponse
 from services.excel import fetch_invoice_template_payload, fetch_offer_template_payload
+from services.auth import get_current_user_id
 from services.storage import (
     supabase,
     upload_template_document,
@@ -38,10 +39,10 @@ def _parse_optional_due_date(raw_due_date: Optional[str]) -> Optional[datetime]:
 
 @router.post("/invoice", status_code=status.HTTP_200_OK)
 def create_invoice(
-    owner_auth_id: UUID = Form(...),
+    current_user_id: str = Depends(get_current_user_id),
 ) -> StreamingResponse:
     """Fetch the stored invoice template bytes and stream them back."""
-    owner_auth_id_str = str(owner_auth_id)
+    owner_auth_id_str = str(UUID(current_user_id))
 
     # Verify tenant exists by canonical tenant identity (owner_auth_id).
     business = (
@@ -78,10 +79,10 @@ def create_invoice(
 
 @router.post("/offer", status_code=status.HTTP_200_OK)
 def create_offer(
-    owner_auth_id: UUID = Form(...),
+    current_user_id: str = Depends(get_current_user_id),
 ) -> StreamingResponse:
     """Fetch the stored offer template bytes and stream them back."""
-    owner_auth_id_str = str(owner_auth_id)
+    owner_auth_id_str = str(UUID(current_user_id))
 
     # Verify tenant exists by canonical tenant identity (owner_auth_id).
     business = (
@@ -118,14 +119,14 @@ def create_offer(
 
 @router.post("/template", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
 def create_template(
-    tenant_id: UUID = Form(...),
     name: str = Form(...),
     doc_type: str = Form(...),
     extension: str = Form(...),
     file: UploadFile = File(...),
+    current_user_id: str = Depends(get_current_user_id),
 ) -> DocumentResponse:
     """Upload and save a document template (invoice or offer)."""
-    tenant_id_str = str(tenant_id)
+    tenant_id_str = str(UUID(current_user_id))
 
     # Validate doc_type and extension
     if doc_type not in ["invoice", "offer"]:

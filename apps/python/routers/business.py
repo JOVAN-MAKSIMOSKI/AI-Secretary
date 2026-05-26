@@ -1,11 +1,33 @@
-"""Business router — POST /business/register."""
+"""Business router — registration plus authenticated business profile routes."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from models.business import BusinessRegisterRequest, BusinessRegisterResponse
+from models.business import (
+    BusinessProfileCreateRequest,
+    BusinessProfileResponse,
+    BusinessRegisterRequest,
+    BusinessRegisterResponse,
+)
+from services.auth import get_current_user_id
 from services.storage import supabase
 
 router = APIRouter(prefix="/business", tags=["business"])
+
+
+def _get_business_by_owner_auth_id(owner_auth_id: str):
+    response = (
+        supabase.table("businesses")
+        .select("id, owner_auth_id, name, email, phone, address, logo_url, plan, created_at")
+        .eq("owner_auth_id", owner_auth_id)
+        .limit(1)
+        .execute()
+    )
+
+    rows = response.data or []
+    if not rows:
+        return None
+
+    return rows[0]
 
 
 @router.post("/register", response_model=BusinessRegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -68,6 +90,89 @@ def register_business(payload: BusinessRegisterRequest) -> BusinessRegisterRespo
         user_id=created["owner_auth_id"],
         name=created["name"],
         email=created["email"],
+        plan=created.get("plan", "free"),
+        created_at=created.get("created_at"),
+    )
+
+
+@router.get("/me", response_model=BusinessProfileResponse, status_code=status.HTTP_200_OK)
+def get_business_profile(current_user_id: str = Depends(get_current_user_id)) -> BusinessProfileResponse:
+    try:
+        business = _get_business_by_owner_auth_id(current_user_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to fetch business profile: {exc}",
+        ) from exc
+
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business profile not found for authenticated user.",
+        )
+
+    return BusinessProfileResponse(
+        business_id=business["id"],
+        owner_auth_id=business["owner_auth_id"],
+        name=business["name"],
+        email=business["email"],
+        phone=business.get("phone"),
+        address=business.get("address"),
+        logo_url=business.get("logo_url"),
+        plan=business.get("plan", "free"),
+        created_at=business.get("created_at"),
+    )
+
+
+@router.post("/profile", response_model=BusinessProfileResponse, status_code=status.HTTP_201_CREATED)
+def create_business_profile(
+    payload: BusinessProfileCreateRequest,
+    current_user_id: str = Depends(get_current_user_id),
+) -> BusinessProfileResponse:
+    existing = _get_business_by_owner_auth_id(current_user_id)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Business profile already exists for authenticated user.",
+        )
+
+    try:
+        response = (
+            supabase.table("businesses")
+            .insert(
+                {
+                    "owner_auth_id": current_user_id,
+                    "name": payload.name,
+                    "email": payload.email,
+                    "phone": payload.phone,
+                    "address": payload.address,
+                    "logo_url": payload.logo_url,
+                }
+            )
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create business profile: {exc}",
+        ) from exc
+
+    data = response.data or []
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Business profile insert returned no data.",
+        )
+
+    created = data[0]
+    return BusinessProfileResponse(
+        business_id=created["id"],
+        owner_auth_id=created["owner_auth_id"],
+        name=created["name"],
+        email=created["email"],
+        phone=created.get("phone"),
+        address=created.get("address"),
+        logo_url=created.get("logo_url"),
         plan=created.get("plan", "free"),
         created_at=created.get("created_at"),
     )

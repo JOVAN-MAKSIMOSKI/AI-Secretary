@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field
 
 
 class ClientCreateRequest(BaseModel):
-    tenant_id: str = Field(description="Tenant auth user ID (owner_auth_id)")
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=254)
     phone: str | None = Field(default=None, max_length=30)

@@ -47,7 +47,6 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): P
 }
 
 export type ClientCreateRequest = {
-  tenant_id: string;
   name: string;
   email: string;
   phone?: string | null;
@@ -101,12 +100,44 @@ export type DocumentTemplateResponse = {
   created_at: string;
 };
 
+export type BusinessProfileResponse = {
+  business_id: string;
+  owner_auth_id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  logo_url: string | null;
+  plan: string;
+  created_at: string | null;
+};
+
+async function getAccessToken(): Promise<string> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw new Error("No active authenticated session.");
+  }
+
+  return data.session.access_token;
+}
+
+async function getAuthHeaders(extraHeaders?: HeadersInit): Promise<HeadersInit> {
+  const accessToken = await getAccessToken();
+
+  return {
+    ...(extraHeaders ?? {}),
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
 export async function createClientProfile(payload: ClientCreateRequest): Promise<ClientResponse> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
   const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -126,8 +157,11 @@ export async function createClientProfile(payload: ClientCreateRequest): Promise
   return (await response.json()) as ClientResponse;
 }
 
-export async function getClientsByTenant(tenantId: string): Promise<ClientResponse[]> {
-  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients/${tenantId}`);
+export async function getClientsByTenant(): Promise<ClientResponse[]> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients`, {
+    headers,
+  });
 
   if (!response.ok) {
     let detail = "Failed to fetch clients.";
@@ -145,9 +179,11 @@ export async function getClientsByTenant(tenantId: string): Promise<ClientRespon
   return (await response.json()) as ClientResponse[];
 }
 
-export async function deleteClientById(tenantId: string, clientId: string): Promise<void> {
-  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients/${tenantId}/${clientId}`, {
+export async function deleteClientById(clientId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients/${clientId}`, {
     method: "DELETE",
+    headers,
   });
 
   if (!response.ok) {
@@ -165,15 +201,16 @@ export async function deleteClientById(tenantId: string, clientId: string): Prom
 }
 
 export async function updateClientById(
-  tenantId: string,
   clientId: string,
   payload: ClientUpdateRequest
 ): Promise<ClientResponse> {
-  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients/${tenantId}/${clientId}`, {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients/${clientId}`, {
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -221,21 +258,22 @@ export async function registerBusinessAccount(
 }
 
 export async function uploadDocumentTemplate(payload: {
-  tenantId: string;
   name: string;
   docType: "invoice" | "offer";
   extension: "xlsx" | "docx";
   file: File;
 }): Promise<DocumentTemplateResponse> {
   const formData = new FormData();
-  formData.append("tenant_id", payload.tenantId);
   formData.append("name", payload.name);
   formData.append("doc_type", payload.docType);
   formData.append("extension", payload.extension);
   formData.append("file", payload.file);
 
+  const headers = await getAuthHeaders();
+
   const response = await fetchWithTimeout(`${pythonApiBaseUrl}/documents/template`, {
     method: "POST",
+    headers,
     body: formData,
   });
 
@@ -273,42 +311,68 @@ export async function signInWithPasswordGrant(email: string, password: string) {
 }
 
 export async function createBusinessProfile(
-  userId: string,
   name: string,
   email: string,
   phone: string | null,
   address: string | null,
   logoUrl: string | null
 ) {
-  const { data, error } = await supabase.from("businesses").insert([
-    {
-      owner_auth_id: userId,
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/business/profile`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
       name,
       email,
       phone,
       address,
       logo_url: logoUrl,
-    },
-  ]);
+    }),
+  });
 
-  if (error) {
-    throw new Error(`Failed to create business: ${error.message}`);
+  if (!response.ok) {
+    let detail = "Failed to create business profile.";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        detail = data.detail;
+      }
+    } catch {
+      // Keep fallback error message when response body is not JSON.
+    }
+    throw new Error(detail);
   }
 
-  return data;
+  return (await response.json()) as BusinessProfileResponse;
 }
 
-export async function getUserBusiness(userId: string) {
-  const { data, error } = await supabase
-    .from("businesses")
-    .select("*")
-    .eq("owner_auth_id", userId)
-    .single();
+export async function getUserBusiness(): Promise<BusinessProfileResponse | null> {
+  const headers = await getAuthHeaders();
 
-  if (error && error.code !== "PGRST116") {
-    throw new Error(`Failed to fetch business: ${error.message}`);
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/business/me`, {
+    headers,
+  });
+
+  if (response.status === 404) {
+    return null;
   }
 
-  return data;
+  if (!response.ok) {
+    let detail = "Failed to fetch business profile.";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        detail = data.detail;
+      }
+    } catch {
+      // Keep fallback error message when response body is not JSON.
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as BusinessProfileResponse;
 }
 

@@ -48,7 +48,6 @@ export default function Documents() {
     setLoading(true);
     try {
       const result = await uploadDocumentTemplate({
-        tenantId,
         name,
         docType,
         extension,
@@ -196,12 +195,12 @@ export default function Documents() {
             <div className="mt-5 space-y-3 text-sm leading-6 text-[var(--brand-text-muted)]">
               <p>Fields sent as multipart form data:</p>
               <ul className="space-y-2 text-[var(--brand-text-muted)]">
-                <li><span className="font-mono text-[var(--brand-ink)]">tenant_id</span> from the logged-in session.</li>
                 <li><span className="font-mono text-[var(--brand-ink)]">name</span> for the template display label.</li>
                 <li><span className="font-mono text-[var(--brand-ink)]">doc_type</span> set to invoice or offer.</li>
                 <li><span className="font-mono text-[var(--brand-ink)]">extension</span> set to xlsx or docx.</li>
                 <li><span className="font-mono text-[var(--brand-ink)]">file</span> as the selected template bytes.</li>
               </ul>
+              <p>Tenant context is derived from the authenticated bearer token.</p>
             </div>
           </aside>
         </div>

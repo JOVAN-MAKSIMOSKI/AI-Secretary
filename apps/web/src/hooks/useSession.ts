@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
-import { supabase } from "../connection/supabase-client";
+import { getUserBusiness, supabase } from "../connection/supabase-client";
 import { useAppContextStore } from "../store/app-context";
 import { useSessionStore } from "../store/session";
 
@@ -17,12 +17,14 @@ export function useSession() {
   const setAppContextLoading = useAppContextStore((state) => state.setLoading);
 
   const loadBusinessId = async (ownerAuthId: string): Promise<string | null> => {
+    if (!ownerAuthId) {
+      setBusinessId(null);
+      setStoredBusinessId(null);
+      return null;
+    }
+
     try {
-      const lookupPromise = supabase
-        .from("businesses")
-        .select("id")
-        .eq("owner_auth_id", ownerAuthId)
-        .maybeSingle();
+      const lookupPromise = getUserBusiness();
 
       const timeoutPromise = new Promise<never>((_, reject) => {
         window.setTimeout(() => {
@@ -30,12 +32,12 @@ export function useSession() {
         }, BUSINESS_LOOKUP_TIMEOUT_MS);
       });
 
-      const { data: business, error } = await Promise.race([lookupPromise, timeoutPromise]);
+      const business = await Promise.race([lookupPromise, timeoutPromise]);
 
-      if (!error && business?.id) {
-        setBusinessId(business.id);
-        setStoredBusinessId(business.id);
-        return business.id;
+      if (business?.business_id) {
+        setBusinessId(business.business_id);
+        setStoredBusinessId(business.business_id);
+        return business.business_id;
       }
     } catch {
       // Keep auth flow moving even if business lookup fails or times out.

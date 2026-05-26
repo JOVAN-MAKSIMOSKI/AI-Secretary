@@ -18,10 +18,10 @@ def print_request_response(response):
 
 
 def test_root(capsys):
-    response = client.get("/clients/e2bcbf74-91e0-4596-bb91-34b9085b4117")
+    response = client.get("/clients")
 
     # Disable pytest capture for this block so it always prints to console.
     with capsys.disabled():
         print_request_response(response)
 
-    assert response.status_code == 200
+    assert response.status_code in [401, 403]
