@@ -112,6 +112,19 @@ export type BusinessProfileResponse = {
   created_at: string | null;
 };
 
+const CLIENTS_CACHE_TTL_MS = 60_000;
+
+type ClientsCache = {
+  data: ClientResponse[];
+  fetchedAt: number;
+};
+
+let clientsCache: ClientsCache | null = null;
+
+export function clearClientsCache(): void {
+  clientsCache = null;
+}
+
 async function getAccessToken(): Promise<string> {
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session?.access_token) {
@@ -154,10 +167,21 @@ export async function createClientProfile(payload: ClientCreateRequest): Promise
     throw new Error(detail);
   }
 
-  return (await response.json()) as ClientResponse;
+  const created = (await response.json()) as ClientResponse;
+  clearClientsCache();
+  return created;
 }
 
-export async function getClientsByTenant(): Promise<ClientResponse[]> {
+export async function getClientsByTenant(options?: { forceRefresh?: boolean }): Promise<ClientResponse[]> {
+  const now = Date.now();
+  if (
+    !options?.forceRefresh &&
+    clientsCache !== null &&
+    now - clientsCache.fetchedAt < CLIENTS_CACHE_TTL_MS
+  ) {
+    return clientsCache.data;
+  }
+
   const headers = await getAuthHeaders();
   const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients`, {
     headers,
@@ -176,7 +200,9 @@ export async function getClientsByTenant(): Promise<ClientResponse[]> {
     throw new Error(detail);
   }
 
-  return (await response.json()) as ClientResponse[];
+  const results = (await response.json()) as ClientResponse[];
+  clientsCache = { data: results, fetchedAt: Date.now() };
+  return results;
 }
 
 export async function deleteClientById(clientId: string): Promise<void> {
@@ -198,6 +224,8 @@ export async function deleteClientById(clientId: string): Promise<void> {
     }
     throw new Error(detail);
   }
+
+  clearClientsCache();
 }
 
 export async function updateClientById(
@@ -227,7 +255,9 @@ export async function updateClientById(
     throw new Error(detail);
   }
 
-  return (await response.json()) as ClientResponse;
+  const updated = (await response.json()) as ClientResponse;
+  clearClientsCache();
+  return updated;
 }
 
 export async function registerBusinessAccount(
