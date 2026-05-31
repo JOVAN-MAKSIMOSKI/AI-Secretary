@@ -78,7 +78,6 @@ export default function Documents() {
   const [taxPercentage, setTaxPercentage] = useState("");
   const [priceBeforeTax, setPriceBeforeTax] = useState("");
   const [priceAfterTax, setPriceAfterTax] = useState("");
-  const [priceAfterTaxText, setPriceAfterTaxText] = useState("");
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState("");
   const [invoiceSuccess, setInvoiceSuccess] = useState("");
@@ -243,11 +242,6 @@ export default function Documents() {
       return;
     }
 
-    if (!priceAfterTaxText.trim()) {
-      setInvoiceError("Price after tax text is required.");
-      return;
-    }
-
     setInvoiceLoading(true);
     try {
       const result = await createInvoiceDocument({
@@ -266,7 +260,6 @@ export default function Documents() {
         tax_percentage: parsedTaxPercentage,
         price_before_tax: parsedPriceBeforeTax,
         price_after_tax: parsedPriceAfterTax,
-        price_after_tax_text: priceAfterTaxText.trim(),
       });
 
       triggerBrowserDownload(result.blob, result.filename);
@@ -623,18 +616,6 @@ export default function Documents() {
               />
             </label>
 
-            <label className="grid gap-2 md:col-span-2">
-              <span className="text-sm font-medium text-[var(--brand-ink)]">Price after tax (text)</span>
-              <input
-                type="text"
-                value={priceAfterTaxText}
-                onChange={(event) => setPriceAfterTaxText(event.target.value)}
-                placeholder="One thousand two hundred euros and fifty cents"
-                maxLength={255}
-                className="h-11 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)]"
-                required
-              />
-            </label>
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-3">

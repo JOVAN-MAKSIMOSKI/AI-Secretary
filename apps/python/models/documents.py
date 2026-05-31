@@ -23,7 +23,7 @@ class InvoiceRequest(BaseModel):
     tax_percentage: Decimal = Field(ge=0, le=100, decimal_places=2, max_digits=5)
     price_before_tax: Decimal = Field(ge=0, decimal_places=2, max_digits=12)
     price_after_tax: Decimal = Field(ge=0, decimal_places=2, max_digits=12)
-    price_after_tax_text: str = Field(min_length=1, max_length=255)
+    price_after_tax_text: Optional[str] = Field(default=None, max_length=255)
     template_id: Optional[str] = None
 
     @field_validator(
@@ -31,7 +31,6 @@ class InvoiceRequest(BaseModel):
         "client_name",
         "client_tax_number",
         "description",
-        "price_after_tax_text",
         mode="before",
     )
     @classmethod

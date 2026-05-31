@@ -4,12 +4,14 @@ from io import BytesIO
 from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
 
 from models.documents import DocumentResponse, InvoiceRequest
 from services.excel import fetch_invoice_template_payload, fetch_offer_template_payload
+from services.invoice_text import amount_to_macedonian_text
 from services.auth import get_current_user_id
 from services.storage import (
     supabase,
@@ -90,6 +92,71 @@ def create_invoice(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="client_tax_number does not match the selected client.",
             )
+
+        try:
+            generated_price_after_tax_text = amount_to_macedonian_text(payload.price_after_tax)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to generate Macedonian amount text: {exc}",
+            ) from exc
+
+        tax_total = Decimal(payload.price_after_tax) - Decimal(payload.price_before_tax)
+
+        existing_invoice = (
+            supabase.table("invoices")
+            .select("id")
+            .eq("tenant_id", resolved_owner_auth_id)
+            .eq("client_id", payload.client_id)
+            .eq("invoice_number", payload.invoice_number)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        invoice_common_data = {
+            "tenant_id": resolved_owner_auth_id,
+            "client_id": payload.client_id,
+            "invoice_number": payload.invoice_number,
+            "invoice_type": payload.invoice_type,
+            "invoice_date": payload.invoice_date.isoformat(),
+            "value_date": payload.value_date.isoformat(),
+            "consignment_note_number": payload.consignment_note_number,
+            "order_number": payload.order_number,
+            "description": payload.description,
+            "units": payload.units,
+            "price_per_unit": str(payload.price_per_unit),
+            "tax_percentage": str(payload.tax_percentage),
+            "tax_total": str(tax_total),
+            "price_before_tax": str(payload.price_before_tax),
+            "price_after_tax": str(payload.price_after_tax),
+            "price_after_tax_text": generated_price_after_tax_text,
+            "title": f"Invoice {payload.invoice_number}",
+            "status": "draft",
+            "template_id": payload.template_id,
+            "amount": str(payload.price_after_tax),
+            "due_date": payload.value_date.isoformat(),
+        }
+
+        existing_rows = existing_invoice.data or []
+        if existing_rows:
+            invoice_id = existing_rows[0]["id"]
+            (
+                supabase.table("invoices")
+                .update(invoice_common_data)
+                .eq("id", invoice_id)
+                .eq("tenant_id", resolved_owner_auth_id)
+                .execute()
+            )
+        else:
+            invoice_id = str(uuid4())
+            storage_path = f"{resolved_owner_auth_id}/invoices/{invoice_id}.xlsx"
+            insert_data = {
+                "id": invoice_id,
+                "storagePath": storage_path,
+                **invoice_common_data,
+            }
+            supabase.table("invoices").insert(insert_data).execute()
 
     try:
         template_payload = fetch_invoice_template_payload(

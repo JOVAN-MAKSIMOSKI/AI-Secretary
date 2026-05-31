@@ -95,7 +95,7 @@ export type InvoiceDocumentRequest = {
   tax_percentage: number;
   price_before_tax: number;
   price_after_tax: number;
-  price_after_tax_text: string;
+  price_after_tax_text?: string;
   template_id?: string | null;
 };
 
