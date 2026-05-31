@@ -598,10 +598,11 @@ export default function Clients() {
           </div>
 
           <div className="overflow-x-auto">
-            <div className="min-w-[800px]">
-              <div className="grid grid-cols-[33%_29%_20%_12%_6%] border-b border-[var(--brand-border)] bg-[#f9fbfc] text-left text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--brand-text-muted)]">
+            <div className="min-w-[920px]">
+              <div className="grid grid-cols-[27%_23%_18%_14%_12%_6%] border-b border-[var(--brand-border)] bg-[#f9fbfc] text-left text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--brand-text-muted)]">
                 <span className="px-5 py-3">Client</span>
                 <span className="px-5 py-3">Email</span>
+                <span className="px-5 py-3">City</span>
                 <span className="px-5 py-3">Phone</span>
                 <span className="px-5 py-3">Added</span>
                 <span className="px-5 py-3 text-right">Actions</span>
@@ -614,7 +615,7 @@ export default function Clients() {
                   clients.map((client) => (
                     <div
                       key={client.id}
-                      className="grid h-16 grid-cols-[33%_29%_20%_12%_6%] border-b border-[#eef2f4] text-sm text-[var(--brand-ink)] transition hover:bg-[var(--brand-surface)]/80 last:border-b-0"
+                      className="grid h-16 grid-cols-[27%_23%_18%_14%_12%_6%] border-b border-[#eef2f4] text-sm text-[var(--brand-ink)] transition hover:bg-[var(--brand-surface)]/80 last:border-b-0"
                     >
                       <div className="px-5 py-4">
                         <div className="flex items-start gap-3">
@@ -623,15 +624,16 @@ export default function Clients() {
                           </span>
                           <div className="min-w-0">
                             <p className="truncate font-medium text-[var(--brand-ink)]">{client.name}</p>
-                            <p className="mt-0.5 truncate text-xs text-[var(--brand-text-muted)]">Tax: {client.tax_number ?? "Not set"}</p>
-                            <p className="mt-0.5 truncate text-xs text-[var(--brand-text-muted)]">City: {client.city ?? "Not set"}</p>
-                            <p className="mt-0.5 truncate text-xs text-[var(--brand-text-muted)]">{client.address ?? "No address yet"}</p>
                           </div>
                         </div>
                       </div>
 
                       <div className="px-5 py-4">
                         <p className="truncate font-medium text-[var(--brand-ink)]">{client.email}</p>
+                      </div>
+
+                      <div className="px-5 py-4 text-[var(--brand-text-muted)]">
+                        {client.city ?? "-"}
                       </div>
 
                       <div className="px-5 py-4">
