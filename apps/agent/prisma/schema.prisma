@@ -7,10 +7,19 @@ datasource db {
   schemas  = ["public"]
 }
 
+enum InvoiceType {
+  goods
+  transport
+
+  @@schema("public")
+}
+
 model clients {
   id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id  String     @db.Uuid
   name       String
+  city       String?
+  tax_number String?
   email      String
   phone      String?
   address    String?
@@ -28,16 +37,28 @@ model invoices {
   id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id   String     @db.Uuid
   client_id   String     @default(uuid()) @db.Uuid
+  invoice_number String?
+  invoice_type   InvoiceType?
+  invoice_date   DateTime?  @db.Date
+  value_date     DateTime?  @db.Date
+  consignment_note_number Int?
+  order_number   Int?
+  description    String?
+  units          Int?
+  price_per_unit Decimal?   @db.Decimal(12, 2)
+  tax_percentage Decimal?   @db.Decimal(5, 2)
+  tax_total      Decimal?   @db.Decimal(12, 2)
+  price_before_tax Decimal? @db.Decimal(12, 2)
+  price_after_tax Decimal?  @db.Decimal(12, 2)
+  price_after_tax_text String?
   title       String
   status      String     @default("draft")
-  file_url    String?
   template_id String?    @db.Uuid
   amount      Decimal?   @db.Decimal(10, 2)
   due_date    DateTime?  @db.Timestamptz(6)
   sent_at     DateTime?  @db.Timestamptz(6)
   paid_at     DateTime?  @db.Timestamptz(6)
   storagePath String   @unique
-  sizeBytes   BigInt?
   created_at  DateTime   @default(now()) @db.Timestamptz(6)
   clients     clients    @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   templates   templatesInvoice? @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -108,6 +129,9 @@ model businesses {
   owner_auth_id String     @unique @db.Uuid
   name          String
   email         String     @unique
+  tax_number    String?
+  transaction_account String?
+  depositor     String?
   phone         String?
   address       String?
   logo_url      String?

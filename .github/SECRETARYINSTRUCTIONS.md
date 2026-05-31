@@ -145,3 +145,13 @@ See [CONVENTIONS.md](CONVENTIONS.md) for complete naming conventions and code st
 - Never use `paragraph.text =` in python-docx — always use runs
 - Never skip `tenant_id` filter on any database, storage, or RAG query
 See [GUARDRAILS.md](GUARDRAILS.md) for complete list of critical constraints and mandatory rules.
+
+---
+
+## Planned RAG Extension (Saved Context)
+
+- A new RAG agent is planned as a separate tab from the existing assistant flow.
+- The new tab should reuse the same base system prompt strategy already used by the main assistant.
+- Its domain focus is legal Q&A for waste management law.
+- The implementation target is the Python RAG module under `apps/python/rag/` with routing that supports isolated tab behavior.
+- Keep tenant isolation rules unchanged: every retrieval and index operation must remain scoped by authenticated tenant identity.

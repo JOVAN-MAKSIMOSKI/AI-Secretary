@@ -8,7 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
 
-from models.documents import DocumentResponse
+from models.documents import DocumentResponse, InvoiceRequest
 from services.excel import fetch_invoice_template_payload, fetch_offer_template_payload
 from services.auth import get_current_user_id
 from services.storage import (
@@ -39,6 +39,7 @@ def _parse_optional_due_date(raw_due_date: Optional[str]) -> Optional[datetime]:
 
 @router.post("/invoice", status_code=status.HTTP_200_OK)
 def create_invoice(
+    payload: Optional[InvoiceRequest] = None,
     current_user_id: str = Depends(get_current_user_id),
 ) -> StreamingResponse:
     """Fetch the stored invoice template bytes and stream them back."""
@@ -58,6 +59,37 @@ def create_invoice(
             detail=f"Tenant '{owner_auth_id_str}' not found.",
         )
     resolved_owner_auth_id = business.data[0]["owner_auth_id"]
+
+    if payload is not None:
+        client_result = (
+            supabase.table("clients")
+            .select("id, name, tax_number")
+            .eq("id", payload.client_id)
+            .eq("tenant_id", resolved_owner_auth_id)
+            .limit(1)
+            .execute()
+        )
+        if not client_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Client not found for this tenant.",
+            )
+
+        client_row = client_result.data[0]
+        stored_name = str(client_row.get("name") or "").strip()
+        stored_tax_number = str(client_row.get("tax_number") or "").strip()
+
+        if stored_name != payload.client_name.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="client_name does not match the selected client.",
+            )
+
+        if stored_tax_number != payload.client_tax_number.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="client_tax_number does not match the selected client.",
+            )
 
     try:
         template_payload = fetch_invoice_template_payload(

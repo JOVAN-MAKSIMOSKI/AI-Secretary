@@ -9,6 +9,9 @@ class BusinessRegisterRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
     password: str = Field(min_length=8, max_length=128)
+    tax_number: str | None = Field(default=None, max_length=60)
+    transaction_account: str | None = Field(default=None, max_length=64)
+    depositor: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=30)
     address: str | None = Field(default=None, max_length=255)
 
@@ -18,6 +21,9 @@ class BusinessRegisterResponse(BaseModel):
     user_id: str
     name: str
     email: str
+    tax_number: str | None = None
+    transaction_account: str | None = None
+    depositor: str | None = None
     plan: str
     created_at: datetime | None = None
 
@@ -25,6 +31,9 @@ class BusinessRegisterResponse(BaseModel):
 class BusinessProfileCreateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
+    tax_number: str | None = Field(default=None, max_length=60)
+    transaction_account: str | None = Field(default=None, max_length=64)
+    depositor: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=30)
     address: str | None = Field(default=None, max_length=255)
     logo_url: str | None = Field(default=None, max_length=1000)
@@ -35,6 +44,9 @@ class BusinessProfileResponse(BaseModel):
     owner_auth_id: str
     name: str
     email: str
+    tax_number: str | None = None
+    transaction_account: str | None = None
+    depositor: str | None = None
     phone: str | None = None
     address: str | None = None
     logo_url: str | None = None

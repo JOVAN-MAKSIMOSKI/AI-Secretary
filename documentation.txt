@@ -1,11 +1,13 @@
-finish the UI (find complementary colour pallet and implement the UI features.).
-
+I am not getting good answers, please investigate them.
+decide exactly what should be done with the agent memory and how to keep the chat exactly.
+query engine built by the service? What happens?  investigate the service deeper.
+step 3 in cloude
 
 implement excel logic(claude contains the prompt)!
 there is a logic about the calendar functionality in the pinned chat.
 ensure RLS security is set up properly
 add indexes for performance when querying
-2 clients can be created under the same tennant with the same email!
+
 consider adding a stronger LLM once finishing the app because request in macedonian might be a problem for the current ollama model.
 
 *Add system prompts in the routers (or a dedicated services/prompts.py file) where you know the context.
@@ -15,7 +17,13 @@ If several routers end up sharing similar prompts, you can consolidate them into
 Can we now revert from SMTP to the way it was with gmail before and complete that set up properly since we are aware that the logic works properly(complex process so use an LLM too)
 Implement security for prompt injection!
 
+Chat history should be set in react state. We can send older chats to context memory
 
+Implement memory to the agent, Regarding the memory, should the agent perform based on memory or just return information.
+"Write a follow-up email to Tom"
+With memory: agent knows the last email was formal, 
+             the invoice is 14 days overdue, 
+             Tom usually replies within 2 days
 
 
 
@@ -33,7 +41,7 @@ import { sendDocumentToClient } from './src/mcp/gmail.ts';
   console.log(JSON.stringify(result, null, 2));
 })();
 
-
+.venv/Scripts/uvicorn main:app --reload --host 0.0.0.0 --port 8000
 Start the FastAPI server
 cd /c/Users/Jovan/Desktop/AI-Secretary/apps/python
 python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000

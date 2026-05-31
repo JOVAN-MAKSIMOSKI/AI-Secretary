@@ -17,7 +17,7 @@ router = APIRouter(prefix="/business", tags=["business"])
 def _get_business_by_owner_auth_id(owner_auth_id: str):
     response = (
         supabase.table("businesses")
-        .select("id, owner_auth_id, name, email, phone, address, logo_url, plan, created_at")
+        .select("id, owner_auth_id, name, email, tax_number, transaction_account, depositor, phone, address, logo_url, plan, created_at")
         .eq("owner_auth_id", owner_auth_id)
         .limit(1)
         .execute()
@@ -65,6 +65,9 @@ def register_business(payload: BusinessRegisterRequest) -> BusinessRegisterRespo
                     "owner_auth_id": owner_auth_id,
                     "name": payload.name,
                     "email": payload.email,
+                    "tax_number": payload.tax_number,
+                    "transaction_account": payload.transaction_account,
+                    "depositor": payload.depositor,
                     "phone": payload.phone,
                     "address": payload.address,
                 }
@@ -90,6 +93,9 @@ def register_business(payload: BusinessRegisterRequest) -> BusinessRegisterRespo
         user_id=created["owner_auth_id"],
         name=created["name"],
         email=created["email"],
+        tax_number=created.get("tax_number"),
+        transaction_account=created.get("transaction_account"),
+        depositor=created.get("depositor"),
         plan=created.get("plan", "free"),
         created_at=created.get("created_at"),
     )
@@ -116,6 +122,9 @@ def get_business_profile(current_user_id: str = Depends(get_current_user_id)) ->
         owner_auth_id=business["owner_auth_id"],
         name=business["name"],
         email=business["email"],
+        tax_number=business.get("tax_number"),
+        transaction_account=business.get("transaction_account"),
+        depositor=business.get("depositor"),
         phone=business.get("phone"),
         address=business.get("address"),
         logo_url=business.get("logo_url"),
@@ -144,6 +153,9 @@ def create_business_profile(
                     "owner_auth_id": current_user_id,
                     "name": payload.name,
                     "email": payload.email,
+                    "tax_number": payload.tax_number,
+                    "transaction_account": payload.transaction_account,
+                    "depositor": payload.depositor,
                     "phone": payload.phone,
                     "address": payload.address,
                     "logo_url": payload.logo_url,
@@ -170,6 +182,9 @@ def create_business_profile(
         owner_auth_id=created["owner_auth_id"],
         name=created["name"],
         email=created["email"],
+        tax_number=created.get("tax_number"),
+        transaction_account=created.get("transaction_account"),
+        depositor=created.get("depositor"),
         phone=created.get("phone"),
         address=created.get("address"),
         logo_url=created.get("logo_url"),

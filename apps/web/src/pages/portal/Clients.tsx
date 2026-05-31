@@ -13,6 +13,8 @@ type ClientRow = {
   id: string;
   name: string;
   email: string;
+  city: string | null;
+  tax_number: string | null;
   phone: string | null;
   address: string | null;
   notes: string | null;
@@ -33,6 +35,8 @@ export default function Clients() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [city, setCity] = useState("");
+  const [taxNumber, setTaxNumber] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
@@ -45,6 +49,8 @@ export default function Clients() {
   const [editingClientId, setEditingClientId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  const [editCity, setEditCity] = useState("");
+  const [editTaxNumber, setEditTaxNumber] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editNotes, setEditNotes] = useState("");
@@ -97,6 +103,8 @@ export default function Clients() {
       const created = await createClientProfile({
         name,
         email,
+        city: city.trim() ? city.trim() : null,
+        tax_number: taxNumber.trim() ? taxNumber.trim() : null,
         phone: phone.trim() ? phone : null,
         address: address.trim() ? address : null,
         notes: notes.trim() ? notes : null,
@@ -107,6 +115,8 @@ export default function Clients() {
       setClientSuccess(`Client ${created.name} created successfully.`);
       setName("");
       setEmail("");
+      setCity("");
+      setTaxNumber("");
       setPhone("");
       setAddress("");
       setNotes("");
@@ -185,6 +195,8 @@ export default function Clients() {
     setEditingClientId(client.id);
     setEditName(client.name);
     setEditEmail(client.email);
+    setEditCity(client.city ?? "");
+    setEditTaxNumber(client.tax_number ?? "");
     setEditPhone(client.phone ?? "");
     setEditAddress(client.address ?? "");
     setEditNotes(client.notes ?? "");
@@ -215,6 +227,8 @@ export default function Clients() {
       const updated = await updateClientById(editingClientId, {
         name: editName,
         email: editEmail,
+        city: editCity.trim() ? editCity.trim() : null,
+        tax_number: editTaxNumber.trim() ? editTaxNumber.trim() : null,
         phone: editPhone.trim() ? editPhone : null,
         address: editAddress.trim() ? editAddress : null,
         notes: editNotes.trim() ? editNotes : null,
@@ -303,6 +317,32 @@ export default function Clients() {
                     minLength={3}
                     maxLength={254}
                     placeholder="client@example.com"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+                    required
+                  />
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Tax number</span>
+                  <input
+                    type="text"
+                    value={taxNumber}
+                    onChange={(event) => setTaxNumber(event.target.value)}
+                    maxLength={60}
+                    placeholder="PIB / VAT / Tax ID"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+                    required
+                  />
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">City</span>
+                  <input
+                    type="text"
+                    value={city}
+                    onChange={(event) => setCity(event.target.value)}
+                    maxLength={120}
+                    placeholder="Belgrade"
                     className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
                     required
                   />
@@ -436,6 +476,32 @@ export default function Clients() {
                     required
                   />
                 </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Tax number</span>
+                  <input
+                    type="text"
+                    value={editTaxNumber}
+                    onChange={(event) => setEditTaxNumber(event.target.value)}
+                    maxLength={60}
+                    placeholder="PIB / VAT / Tax ID"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+                    required
+                  />
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">City</span>
+                  <input
+                    type="text"
+                    value={editCity}
+                    onChange={(event) => setEditCity(event.target.value)}
+                    maxLength={120}
+                    placeholder="Belgrade"
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+                    required
+                  />
+                </label>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -557,6 +623,8 @@ export default function Clients() {
                           </span>
                           <div className="min-w-0">
                             <p className="truncate font-medium text-[var(--brand-ink)]">{client.name}</p>
+                            <p className="mt-0.5 truncate text-xs text-[var(--brand-text-muted)]">Tax: {client.tax_number ?? "Not set"}</p>
+                            <p className="mt-0.5 truncate text-xs text-[var(--brand-text-muted)]">City: {client.city ?? "Not set"}</p>
                             <p className="mt-0.5 truncate text-xs text-[var(--brand-text-muted)]">{client.address ?? "No address yet"}</p>
                           </div>
                         </div>

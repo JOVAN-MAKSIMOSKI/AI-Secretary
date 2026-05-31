@@ -14,6 +14,9 @@ export default function SignUp() {
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [confirmPassword, setConfirmPassword] = useState("");
+	const [taxNumber, setTaxNumber] = useState("");
+	const [transactionAccount, setTransactionAccount] = useState("");
+	const [depositor, setDepositor] = useState("");
 	const [phone, setPhone] = useState("");
 	const [address, setAddress] = useState("");
 	const [logoUrl, setLogoUrl] = useState("");
@@ -38,6 +41,9 @@ export default function SignUp() {
 				name,
 				email,
 				password,
+				tax_number: taxNumber.trim() ? taxNumber.trim() : null,
+				transaction_account: transactionAccount.trim() ? transactionAccount.trim() : null,
+				depositor: depositor.trim() ? depositor.trim() : null,
 				phone: phone.trim() ? phone : null,
 				address: address.trim() ? address : null,
 			});
@@ -88,7 +94,7 @@ export default function SignUp() {
 					</div>
 
 					<div className="max-w-sm rounded-2xl border border-white/10 bg-white/5 p-6 text-sm leading-6 text-[#b8c3d1]">
-						Required fields: name, email, phone, and address. Logo URL is optional.
+						Required fields: name, email, tax number, transaction account, depositor, phone, and address.
 					</div>
 				</section>
 
@@ -150,6 +156,42 @@ export default function SignUp() {
 									value={email}
 									onChange={(event) => setEmail(event.target.value)}
 									placeholder="you@example.com"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+									required
+								/>
+							</label>
+
+							<label className="block space-y-2">
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Tax number</span>
+								<input
+									type="text"
+									value={taxNumber}
+									onChange={(event) => setTaxNumber(event.target.value)}
+									placeholder="PIB / VAT / Tax ID"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+									required
+								/>
+							</label>
+
+							<label className="block space-y-2">
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Transaction account</span>
+								<input
+									type="text"
+									value={transactionAccount}
+									onChange={(event) => setTransactionAccount(event.target.value)}
+									placeholder="e.g. 265-0000000000000-00"
+									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+									required
+								/>
+							</label>
+
+							<label className="block space-y-2">
+								<span className="text-sm font-medium text-[var(--brand-ink)]">Depositor</span>
+								<input
+									type="text"
+									value={depositor}
+									onChange={(event) => setDepositor(event.target.value)}
+									placeholder="Business legal depositor name"
 									className="h-12 w-full rounded-xl border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
 									required
 								/>
