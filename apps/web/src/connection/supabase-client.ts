@@ -486,6 +486,70 @@ export async function getUserBusiness(): Promise<BusinessProfileResponse | null>
 
 const RAG_TIMEOUT_MS = 120_000;
 
+const EXTRACTION_TIMEOUT_MS = 120_000;
+
+export type ExtractedInvoiceFromMessage = {
+  invoice_type?: "goods" | "transport" | null;
+  value_date?: string;
+  invoice_month?: number;
+  invoice_year?: number;
+  consignment_note_number?: number;
+  order_number?: number;
+  client_id?: string;
+  client_name?: string;
+  client_tax_number?: string;
+  description?: string;
+  units?: number;
+  price_per_unit?: number;
+  tax_percentage?: number;
+  price_before_tax?: number;
+  price_after_tax?: number;
+  business?: {
+    invoice_counter?: number;
+    [key: string]: unknown;
+  };
+};
+
+export async function extractDashboardMessage(message: string): Promise<ExtractedInvoiceFromMessage> {
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${pythonApiBaseUrl}/documents/extract`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      throw new Error("Extraction timed out. The model may still be loading — try again shortly.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    let detail = "Extraction request failed.";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        detail = data.detail;
+      }
+    } catch {
+      // keep fallback
+    }
+    throw new Error(detail);
+  }
+
+  const data = (await response.json()) as { extracted: ExtractedInvoiceFromMessage };
+  return data.extracted ?? {};
+}
+
 export async function queryLawDocuments(question: string, topK = 5): Promise<string> {
   const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 

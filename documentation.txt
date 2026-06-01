@@ -1,7 +1,8 @@
+Try to implement gmail SMP to move on to sending the invoice.
 I am not getting good answers, please investigate them.
 decide exactly what should be done with the agent memory and how to keep the chat exactly.
 query engine built by the service? What happens?  investigate the service deeper.
-step 3 in cloude
+set invoice number logic
 
 implement excel logic(claude contains the prompt)!
 there is a logic about the calendar functionality in the pinned chat.
@@ -31,6 +32,13 @@ With memory: agent knows the last email was formal,
 
 FRONT END 
 Calendar tool can be displayed, meetings can be set manually in the UI, they just shouldnt be calling the MCPtool directly because of secret env variables.
+
+
+
+fix the readme inside github to match athlys readme
+
+
+
 
 SEND INVOICE TO CLIENT
 

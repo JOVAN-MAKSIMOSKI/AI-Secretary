@@ -1,17 +1,27 @@
 """Document generation router for invoices, offers, and templates."""
 
+import json
 from io import BytesIO
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID, uuid4
 from datetime import datetime
 from decimal import Decimal
+import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
+from postgrest.exceptions import APIError
 
-from models.documents import DocumentResponse, InvoiceRequest
-from services.excel import fetch_invoice_template_payload, fetch_offer_template_payload
-from services.invoice_text import amount_to_macedonian_text
+from models.documents import DocumentResponse, ExtractionRequest, ExtractionResponse, InvoiceRequest
+from services.invoices.excel import (
+    extract_invoice_fields_from_message,
+    fetch_invoice_template_payload,
+    fetch_offer_template_payload,
+    fetch_business_values,
+    render_invoice_template_bytes,
+)
+from services.invoices.invoice_text import amount_to_macedonian_text
 from services.auth import get_current_user_id
 from services.storage import (
     supabase,
@@ -19,6 +29,117 @@ from services.storage import (
 )
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+logger = logging.getLogger(__name__)
+_UNKNOWN_COLUMN_PATTERN = re.compile(r"Could not find the '([^']+)' column", re.IGNORECASE)
+
+
+def _extract_unknown_column_name(exc: Exception) -> str | None:
+    if isinstance(exc, APIError):
+        payload = getattr(exc, "json", None)
+        if isinstance(payload, dict):
+            message = payload.get("message")
+            if isinstance(message, str):
+                match = _UNKNOWN_COLUMN_PATTERN.search(message)
+                if match:
+                    return match.group(1)
+
+    match = _UNKNOWN_COLUMN_PATTERN.search(str(exc))
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def _insert_invoice_with_schema_fallback(insert_data: dict[str, Any]) -> None:
+    payload = dict(insert_data)
+
+    while True:
+        try:
+            supabase.table("invoices").insert(payload).execute()
+            return
+        except Exception as exc:
+            unknown_column = _extract_unknown_column_name(exc)
+            if unknown_column is None or unknown_column not in payload:
+                raise
+
+            # Handle schema drift between deployed PostgREST schema and local code.
+            payload.pop(unknown_column, None)
+
+
+def _update_invoice_with_schema_fallback(
+    invoice_id: str,
+    tenant_id: str,
+    update_data: dict[str, Any],
+) -> None:
+    payload = dict(update_data)
+
+    while True:
+        try:
+            (
+                supabase.table("invoices")
+                .update(payload)
+                .eq("id", invoice_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            return
+        except Exception as exc:
+            unknown_column = _extract_unknown_column_name(exc)
+            if unknown_column is None or unknown_column not in payload:
+                raise
+
+            # Handle schema drift between deployed PostgREST schema and local code.
+            payload.pop(unknown_column, None)
+
+
+def _increment_business_invoice_counter(owner_auth_id: str) -> None:
+    """Increment the per-business invoice counter after successful invoice creation."""
+    business_response = (
+        supabase.table("businesses")
+        .select("invoice_counter")
+        .eq("owner_auth_id", owner_auth_id)
+        .limit(1)
+        .execute()
+    )
+    rows = business_response.data or []
+    if not rows:
+        raise ValueError(f"Business for owner '{owner_auth_id}' not found.")
+
+    current_counter = rows[0].get("invoice_counter")
+    next_counter = int(current_counter or 0) + 1
+
+    (
+        supabase.table("businesses")
+        .update({"invoice_counter": next_counter})
+        .eq("owner_auth_id", owner_auth_id)
+        .execute()
+    )
+
+
+@router.post("/extract", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
+def extract_from_raw_message(
+    payload: ExtractionRequest,
+    current_user_id: str = Depends(get_current_user_id),
+) -> ExtractionResponse:
+    """Run the LangChain extraction chain against the raw message text."""
+    try:
+        extracted = extract_invoice_fields_from_message(
+            payload.message,
+            owner_auth_id=current_user_id,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Extraction chain failed: {exc}",
+        ) from exc
+
+    logger.info(
+        "Invoice extraction payload user_id=%s extracted=%s",
+        current_user_id,
+        json.dumps(extracted, ensure_ascii=True),
+    )
+
+    return ExtractionResponse(extracted=extracted)
 
 
 def _parse_optional_due_date(raw_due_date: Optional[str]) -> Optional[datetime]:
@@ -61,11 +182,12 @@ def create_invoice(
             detail=f"Tenant '{owner_auth_id_str}' not found.",
         )
     resolved_owner_auth_id = business.data[0]["owner_auth_id"]
+    rendered_template_bytes: bytes | None = None
 
     if payload is not None:
         client_result = (
             supabase.table("clients")
-            .select("id, name, tax_number")
+            .select("id, name, tax_number, address, city")
             .eq("id", payload.client_id)
             .eq("tenant_id", resolved_owner_auth_id)
             .limit(1)
@@ -102,6 +224,8 @@ def create_invoice(
             ) from exc
 
         tax_total = Decimal(payload.price_after_tax) - Decimal(payload.price_before_tax)
+        invoice_month = payload.invoice_date.month
+        invoice_year = payload.invoice_date.year
 
         existing_invoice = (
             supabase.table("invoices")
@@ -134,19 +258,15 @@ def create_invoice(
             "title": f"Invoice {payload.invoice_number}",
             "status": "draft",
             "template_id": payload.template_id,
-            "amount": str(payload.price_after_tax),
-            "due_date": payload.value_date.isoformat(),
         }
 
         existing_rows = existing_invoice.data or []
         if existing_rows:
             invoice_id = existing_rows[0]["id"]
-            (
-                supabase.table("invoices")
-                .update(invoice_common_data)
-                .eq("id", invoice_id)
-                .eq("tenant_id", resolved_owner_auth_id)
-                .execute()
+            _update_invoice_with_schema_fallback(
+                invoice_id=invoice_id,
+                tenant_id=resolved_owner_auth_id,
+                update_data=invoice_common_data,
             )
         else:
             invoice_id = str(uuid4())
@@ -156,7 +276,37 @@ def create_invoice(
                 "storagePath": storage_path,
                 **invoice_common_data,
             }
-            supabase.table("invoices").insert(insert_data).execute()
+            _insert_invoice_with_schema_fallback(insert_data)
+            _increment_business_invoice_counter(resolved_owner_auth_id)
+
+        business_values = fetch_business_values(resolved_owner_auth_id)
+        invoice_render_values = {
+            "invoice_number": payload.invoice_number,
+            "invoice_type": payload.invoice_type,
+            "invoice_date": payload.invoice_date.isoformat(),
+            "value_date": payload.value_date.isoformat(),
+            "invoice_month": invoice_month,
+            "invoice_year": invoice_year,
+            "consignment_note_number": payload.consignment_note_number,
+            "order_number": payload.order_number,
+            "client_name": payload.client_name,
+            "client_tax_number": payload.client_tax_number,
+            "description": payload.description,
+            "units": payload.units,
+            "price_per_unit": payload.price_per_unit,
+            "tax_percentage": payload.tax_percentage,
+            "tax_total": tax_total,
+            "price_before_tax": payload.price_before_tax,
+            "price_after_tax": payload.price_after_tax,
+            "price_after_tax_text": generated_price_after_tax_text,
+            "client": {
+                "name": payload.client_name,
+                "address": client_row.get("address"),
+                "city": client_row.get("city"),
+                "taxnumber": payload.client_tax_number,
+            },
+            "business": business_values.get("business", {}),
+        }
 
     try:
         template_payload = fetch_invoice_template_payload(
@@ -168,9 +318,15 @@ def create_invoice(
             detail=str(exc),
         ) from exc
 
+    if payload is not None:
+        rendered_template_bytes = render_invoice_template_bytes(
+            template_payload["template_bytes"],
+            invoice_render_values,
+        )
+
     filename = f"{template_payload['template_name']}.xlsx"
     return StreamingResponse(
-        BytesIO(template_payload["template_bytes"]),
+        BytesIO(rendered_template_bytes or template_payload["template_bytes"]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

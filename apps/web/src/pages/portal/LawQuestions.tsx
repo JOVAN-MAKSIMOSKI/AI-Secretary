@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useAppContextStore } from "../../store/app-context";
 import { useSessionStore } from "../../store/session";
 import { queryLawDocuments } from "../../connection/supabase-client";
@@ -89,6 +89,15 @@ export default function LawQuestions() {
     }
   };
 
+  const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  };
+
   const clearChat = () => {
     setMessages([]);
   };
@@ -170,6 +179,7 @@ export default function LawQuestions() {
             <textarea
               value={input}
               onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleInputKeyDown}
               rows={3}
               maxLength={4000}
               disabled={isLoading}

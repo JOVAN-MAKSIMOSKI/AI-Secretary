@@ -2,14 +2,14 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class InvoiceRequest(BaseModel):
     client_id: str
-    invoice_number: str = Field(pattern=r"^\d+/\d+$")
+    invoice_number: str = Field(pattern=r"^\d{3,}/\d+$")
     invoice_type: Literal["goods", "transport"]
     invoice_date: date
     value_date: date
@@ -25,6 +25,35 @@ class InvoiceRequest(BaseModel):
     price_after_tax: Decimal = Field(ge=0, decimal_places=2, max_digits=12)
     price_after_tax_text: Optional[str] = Field(default=None, max_length=255)
     template_id: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def set_tax_percentage_from_invoice_type(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        tax_by_type = {
+            "goods": Decimal("18"),
+            "transport": Decimal("5"),
+        }
+        invoice_type = data.get("invoice_type")
+        expected_tax = tax_by_type.get(invoice_type)
+        if expected_tax is None:
+            return data
+
+        payload = dict(data)
+        provided_tax = payload.get("tax_percentage")
+
+        if provided_tax in (None, ""):
+            payload["tax_percentage"] = expected_tax
+            return payload
+
+        if Decimal(str(provided_tax)) != expected_tax:
+            raise ValueError(
+                f"tax_percentage must be {expected_tax} for invoice_type '{invoice_type}'."
+            )
+
+        return payload
 
     @field_validator(
         "invoice_number",
@@ -52,6 +81,25 @@ class InvoiceRequest(BaseModel):
             )
 
         return self
+
+
+class ExtractionRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("message", mode="before")
+    @classmethod
+    def normalize_message(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("must be a string")
+
+        if not value.strip():
+            raise ValueError("must not be empty")
+
+        return value
+
+
+class ExtractionResponse(BaseModel):
+    extracted: dict[str, Any]
 
 
 class OfferRequest(BaseModel):
