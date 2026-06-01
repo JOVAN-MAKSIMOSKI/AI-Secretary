@@ -41,6 +41,22 @@ _EMPTY_LIKE_STRINGS = {
     "",
 }
 
+_PROMPT_INJECTION_PATTERNS = [
+    re.compile(r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions?", re.IGNORECASE),
+    re.compile(r"disregard\s+(the\s+)?(system|developer|safety)\s+instructions?", re.IGNORECASE),
+    re.compile(r"reveal\s+(the\s+)?(system|developer)\s+prompt", re.IGNORECASE),
+    re.compile(r"you\s+are\s+now\s+(an?|the)", re.IGNORECASE),
+    re.compile(r"act\s+as\s+(an?|the)", re.IGNORECASE),
+    re.compile(r"jailbreak|do\s+anything\s+now|dan\b", re.IGNORECASE),
+    re.compile(r"<(system|assistant|developer)>|```(system|assistant|developer)", re.IGNORECASE),
+]
+
+
+def _contains_prompt_injection(text: str) -> bool:
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _PROMPT_INJECTION_PATTERNS)
+
 
 def _parse_number_like(value: Any) -> float | None:
     if isinstance(value, bool):
@@ -217,6 +233,12 @@ def run_invoice_extraction(
     allowed_keys: Iterable[str],
 ) -> dict[str, Any]:
     """Extract user-provided invoice fields from free text and return structured data."""
+    if _contains_prompt_injection(message):
+        raise ValueError(
+            "Extraction request rejected due to suspected prompt-injection content. "
+            "Provide only invoice details without meta-instructions."
+        )
+
     prompt_template = (
         "You are an extraction assistant for invoice drafting. "
         "Extract only user-provided invoice fields from the user message and return JSON only.\n\n"

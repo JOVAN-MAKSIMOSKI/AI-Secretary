@@ -1,34 +1,105 @@
-// MCP tool — SMTP integration for sending invoices/offers to clients
-// Requires SMTP_USER and SMTP_PASS env vars
+// MCP tool — Gmail API integration for sending invoices/offers to clients
+// Requires GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN env vars
 
-import nodemailer from 'nodemailer';
+import { google } from 'googleapis';
 import { supabase } from '../lib/supabase.js';
 
-const smtpUser = process.env.SMTP_USER;
-const smtpPass = process.env.SMTP_PASS;
+function getGmailAuth() {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
 
-if (!smtpUser || !smtpPass) {
-  throw new Error('SMTP_USER and SMTP_PASS are required for SMTP email sending.');
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN are required for Gmail sending.'
+    );
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    clientId,
+    clientSecret,
+    process.env.GOOGLE_REDIRECT_URL || 'http://localhost:3000/auth/google/callback'
+  );
+
+  oauth2Client.setCredentials({
+    refresh_token: refreshToken,
+  });
+
+  return oauth2Client;
 }
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: smtpUser,
-    pass: smtpPass,
-  },
-});
+function toBase64Url(input: Buffer): string {
+  return input
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
 
-export async function sendSmtpTestEmail(to: string = 'test@example.com') {
-  return transporter.sendMail({
-    from: smtpUser,
+function buildMimeMessage(params: {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+  filename: string;
+  attachment: Buffer;
+}): string {
+  const boundary = `boundary_${Date.now().toString(36)}`;
+  const attachmentBase64 = params.attachment.toString('base64');
+
+  const mime = [
+    `From: ${params.from}`,
+    `To: ${params.to}`,
+    `Subject: ${params.subject}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    params.text,
+    '',
+    `--${boundary}`,
+    `Content-Type: application/octet-stream; name="${params.filename}"`,
+    'Content-Transfer-Encoding: base64',
+    `Content-Disposition: attachment; filename="${params.filename}"`,
+    '',
+    attachmentBase64,
+    '',
+    `--${boundary}--`,
+  ].join('\r\n');
+
+  return toBase64Url(Buffer.from(mime, 'utf-8'));
+}
+
+export async function sendGmailTestEmail(to: string = 'test@example.com') {
+  const auth = getGmailAuth();
+  const gmail = google.gmail({ version: 'v1', auth });
+  const from = process.env.GMAIL_FROM_EMAIL || process.env.GOOGLE_SENDER_EMAIL || 'me';
+
+  const raw = buildMimeMessage({
+    from,
     to,
     subject: 'Test',
-    text: 'SMTP works',
+    text: 'Gmail API works',
+    filename: 'test.txt',
+    attachment: Buffer.from('Gmail API test attachment', 'utf-8'),
   });
+
+  const result = await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw },
+  });
+
+  return {
+    id: result.data.id,
+    threadId: result.data.threadId,
+  };
 }
+
+// Backward-compatible alias for previous caller name.
+export const sendSmtpTestEmail = sendGmailTestEmail;
 
 /**
  * Fetch document file from Supabase storage
@@ -154,18 +225,22 @@ Best regards,
 ${business.name}
     `.trim();
 
-    // Send via SMTP
-    const result = await transporter.sendMail({
-      from: smtpUser,
+    const auth = getGmailAuth();
+    const gmail = google.gmail({ version: 'v1', auth });
+    const from = process.env.GMAIL_FROM_EMAIL || process.env.GOOGLE_SENDER_EMAIL || String(business.email || 'me');
+
+    const raw = buildMimeMessage({
+      from,
       to: recipientEmail,
       subject,
       text: body,
-      attachments: [
-        {
-          filename,
-          content: buffer,
-        },
-      ],
+      filename,
+      attachment: buffer,
+    });
+
+    const result = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw },
     });
 
     // Update document status and sent_at timestamp
@@ -180,7 +255,7 @@ ${business.name}
 
     return {
       success: true,
-      messageId: result.messageId,
+      messageId: result.data.id || undefined,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -15,8 +15,7 @@ consider adding a stronger LLM once finishing the app because request in macedon
 For example, when you implement routers/rag.py, the RAG-specific system prompt lives there. A document generation prompt lives in routers/documents.py. That way each feature owns its own instructions and langchain.py stays reusable.
 If several routers end up sharing similar prompts, you can consolidate them into a services/prompts.py file. But start in the routers — no need to abstract early.
 
-Can we now revert from SMTP to the way it was with gmail before and complete that set up properly since we are aware that the logic works properly(complex process so use an LLM too)
-Implement security for prompt injection!
+
 
 Chat history should be set in react state. We can send older chats to context memory
 
@@ -67,3 +66,35 @@ Semantic search could be added for the word offers/
 start the front end
 Run this from web:
 pnpm dev
+
+
+GMAIL SETUP (REVERTED FROM SMTP TO GMAIL API)
+
+The email sender now uses Gmail API OAuth (not SMTP).
+Required env vars in apps/agent:
+- GOOGLE_CLIENT_ID
+- GOOGLE_CLIENT_SECRET
+- GOOGLE_REFRESH_TOKEN
+- GOOGLE_REDIRECT_URL (optional, defaults to http://localhost:3000/auth/google/callback)
+- GMAIL_FROM_EMAIL (optional, fallback sender header)
+
+Scopes needed when generating refresh token:
+- https://www.googleapis.com/auth/gmail.send
+
+Quick test command from apps/agent:
+pnpm exec tsx -e "
+import { sendSmtpTestEmail } from './src/mcp/gmail.ts';
+(async () => {
+  const result = await sendSmtpTestEmail('your-test-email@example.com');
+  console.log(JSON.stringify(result, null, 2));
+})();
+"
+
+Send invoice command (existing flow):
+pnpm exec tsx -e "
+import { sendDocumentToClient } from './src/mcp/gmail.ts';
+(async () => {
+  const result = await sendDocumentToClient(tenantId, clientId, documentId, 'invoice');
+  console.log(JSON.stringify(result, null, 2));
+})();
+"
