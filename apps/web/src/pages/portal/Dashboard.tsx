@@ -2,6 +2,7 @@ import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
 import {
   createInvoiceDocument,
   extractDashboardMessage,
+  type DashboardResolveAndRunResponse,
   type ExtractedInvoiceFromMessage,
   type InvoiceDocumentRequest,
 } from "../../connection/supabase-client";
@@ -266,6 +267,37 @@ function buildInvoicePayloadFromExtraction(
   return { payload };
 }
 
+function formatNonInvoiceChainResponse(response: DashboardResolveAndRunResponse): string {
+  const extracted = response.result?.extracted ?? {};
+  const prettyExtracted = JSON.stringify(extracted, null, 2);
+
+  if (response.resolvedChainId === "calendar_event_extraction") {
+    const success = response.result?.success === true;
+    const message =
+      typeof response.result?.message === "string" && response.result.message.trim().length > 0
+        ? response.result.message
+        : success
+          ? "Meeting booked successfully."
+          : "Failed to book meeting.";
+
+    return message;
+  }
+
+  if (response.resolvedChainId === "offer_extraction") {
+    return [
+      "I detected an offer request and routed it to the offer extraction chain.",
+      "Extracted fields:",
+      prettyExtracted,
+    ].join("\n\n");
+  }
+
+  return [
+    "I routed your request to a non-invoice chain.",
+    "Extracted fields:",
+    prettyExtracted,
+  ].join("\n\n");
+}
+
 
 export default function PortalDashboard() {
   const tenantId = useSessionStore((state) => state.tenantId);
@@ -331,7 +363,20 @@ export default function PortalDashboard() {
     setError(null);
 
     try {
-      const extracted = await extractDashboardMessage(content);
+      const resolveResponse = await extractDashboardMessage(content);
+      const extracted = (resolveResponse.result?.extracted ?? {}) as ExtractedInvoiceFromMessage;
+
+      if (resolveResponse.resolvedChainId !== "invoice_extraction") {
+        const assistantMessage: ChatMessage = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: "assistant",
+          content: formatNonInvoiceChainResponse(resolveResponse),
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((current) => [...current, assistantMessage]);
+        return;
+      }
+
       const mergedDraft = mergeExtractedInvoiceDraft(invoiceDraft, extracted);
       const enrichedDraft = applySingleNumberFollowUp(mergedDraft, extracted, content);
       setInvoiceDraft(enrichedDraft);
@@ -407,7 +452,7 @@ export default function PortalDashboard() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-medium text-[var(--brand-ink)]">Assistant Chat</h2>
-                <p className="mt-1 text-xs text-[var(--brand-text-muted)]">Sends your raw message to the LangChain extraction chain.</p>
+                <p className="mt-1 text-xs text-[var(--brand-text-muted)]">Routes your message to invoice, offer, or calendar extraction and responds with structured output.</p>
               </div>
               <button
                 type="button"
@@ -424,7 +469,7 @@ export default function PortalDashboard() {
               <div className="grid h-full place-items-center">
                 <div className="max-w-md text-center">
                   <h3 className="text-xl font-medium tracking-[-0.01em] text-[var(--brand-ink)]">How can I help you today?</h3>
-                  <p className="mt-2 text-sm text-[var(--brand-text-muted)]">Write invoice details in plain text and the extraction chain will return structured output.</p>
+                  <p className="mt-2 text-sm text-[var(--brand-text-muted)]">You can ask for invoice, offer, or calendar extraction in plain text.</p>
                 </div>
               </div>
             ) : (

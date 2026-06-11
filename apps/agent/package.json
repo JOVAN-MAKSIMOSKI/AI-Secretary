@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint src",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test:resolver": "tsx --test src/agent/nodes/llmResolver.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

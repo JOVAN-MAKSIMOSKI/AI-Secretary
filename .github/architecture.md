@@ -18,7 +18,9 @@ secretary/
 │   │   │   │   ├── state.ts           # Typed agent state interface
 │   │   │   │   ├── nodes/
 │   │   │   │   │   ├── planner.ts     # Interprets user command
-│   │   │   │   │   ├── resolver.ts    # Fetches client + RAG context
+│   │   │   │   │   ├── resolver.ts    # LLM resolver that selects which chain to run
+│   │   │   │   │   ├── llmResolver.ts # Anthropic-based routing decision helper
+│   │   │   │   │   ├── chainRegistry.ts # Source of truth for available chains
 │   │   │   │   │   ├── executor.ts    # Calls document/comms tools
 │   │   │   │   │   └── auditor.ts     # Writes audit log entry
 │   │   │   │   └── edges/
@@ -164,3 +166,10 @@ Two backend services run in parallel and communicate over HTTP:
 - The Python service exposes HTTP endpoints that the agent calls as tools.
 - All LLM calls happen exclusively in apps/agent, never in apps/python.
 - The React frontend in apps/web calls apps/agent directly via Axios.
+
+## LLM Resolver Contract
+
+- The resolver route decision must be centralized in apps/agent/src/agent/nodes/resolver.ts.
+- Chain metadata must be registered in apps/agent/src/agent/nodes/chainRegistry.ts.
+- Every time a new chain is added, update chainRegistry.ts in the same change set.
+- apps/agent/src/agent/nodes/llmResolver.ts is the only place that should call Anthropic for routing.

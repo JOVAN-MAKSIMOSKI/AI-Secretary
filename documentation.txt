@@ -1,14 +1,16 @@
-Try to implement gmail SMP to move on to sending the invoice.
+the word client when asking for a meeting booked or anything outside the invoices is going to return missing units, maybe the word is associated with invoices and the router selects the invoice chain
+I should have 2 chains now, figure out if langgraph if neded and how do I use it, and take a step back to understand the newly written code. There is a plan on how to set up langgraph, after understanding langgraph set it up
+fetch latest gmails into a card metric
 I am not getting good answers, please investigate them.
 decide exactly what should be done with the agent memory and how to keep the chat exactly.
 query engine built by the service? What happens?  investigate the service deeper.
 set invoice number logic
 
 implement excel logic(claude contains the prompt)!
-there is a logic about the calendar functionality in the pinned chat.
+there is a logic about the calendar functionality in the pinned chat
 ensure RLS security is set up properly
 add indexes for performance when querying
-
+time zone is fixed
 consider adding a stronger LLM once finishing the app because request in macedonian might be a problem for the current ollama model.
 
 *Add system prompts in the routers (or a dedicated services/prompts.py file) where you know the context.
@@ -44,12 +46,11 @@ SEND INVOICE TO CLIENT
 cd /c/Users/Jovan/Desktop/AI-Secretary/apps/agent && pnpm exec tsx -e "
 import { sendDocumentToClient } from './src/mcp/gmail.ts';
 (async () => {
-  const result = await sendDocumentToClient(tenantId, clientId, documentId, 'invoice');
+  const result = await sendDocumentToClient(tenantId, userAuthId, clientId, documentId, 'invoice');
   console.log(JSON.stringify(result, null, 2));
 })();
 
 .venv/Scripts/uvicorn main:app --reload --host 0.0.0.0 --port 8000
-Start the FastAPI server
 cd /c/Users/Jovan/Desktop/AI-Secretary/apps/python
 python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
@@ -74,18 +75,20 @@ The email sender now uses Gmail API OAuth (not SMTP).
 Required env vars in apps/agent:
 - GOOGLE_CLIENT_ID
 - GOOGLE_CLIENT_SECRET
-- GOOGLE_REFRESH_TOKEN
-- GOOGLE_REDIRECT_URL (optional, defaults to http://localhost:3000/auth/google/callback)
+- GOOGLE_REDIRECT_URL (optional, defaults to http://localhost:3000/auth/google/gmail/callback)
+- GMAIL_TOKEN_ENCRYPTION_KEY (32-byte base64 or 64-char hex)
+- GMAIL_OAUTH_STATE_SECRET
 - GMAIL_FROM_EMAIL (optional, fallback sender header)
 
 Scopes needed when generating refresh token:
 - https://www.googleapis.com/auth/gmail.send
+- https://www.googleapis.com/auth/calendar
 
 Quick test command from apps/agent:
 pnpm exec tsx -e "
 import { sendSmtpTestEmail } from './src/mcp/gmail.ts';
 (async () => {
-  const result = await sendSmtpTestEmail('your-test-email@example.com');
+  const result = await sendSmtpTestEmail(tenantId, userAuthId, 'your-test-email@example.com');
   console.log(JSON.stringify(result, null, 2));
 })();
 "
@@ -94,7 +97,7 @@ Send invoice command (existing flow):
 pnpm exec tsx -e "
 import { sendDocumentToClient } from './src/mcp/gmail.ts';
 (async () => {
-  const result = await sendDocumentToClient(tenantId, clientId, documentId, 'invoice');
+  const result = await sendDocumentToClient(tenantId, userAuthId, clientId, documentId, 'invoice');
   console.log(JSON.stringify(result, null, 2));
 })();
 "

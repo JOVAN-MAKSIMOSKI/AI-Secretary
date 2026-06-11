@@ -13,6 +13,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': 'http://localhost:3001',
+      '/agent-api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/agent-api/, ''),
+      },
       '/python-api': {
         target: 'http://localhost:8000',
         changeOrigin: true,

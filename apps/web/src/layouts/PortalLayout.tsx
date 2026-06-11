@@ -9,6 +9,7 @@ const navItems = [
   { label: "Documents", to: "/portal/documents", icon: FileText },
   { label: "Calendar", to: "/portal/calendar", icon: CalendarDays },
   { label: "Law Questions", to: "/portal/law-questions", icon: Brain },
+  { label: "Settings", to: "/portal/settings", icon: Settings },
 ];
 
 export default function PortalLayout() {
@@ -73,13 +74,21 @@ export default function PortalLayout() {
           <p className="mt-6 px-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[#4a5568]">Assistant</p>
 
           <div className="mt-auto space-y-1 border-t border-[#2c3747] pt-4">
-            <button
-              type="button"
-              className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[13px] text-[#8b95a6] transition hover:bg-[#263041] hover:text-white"
+            <NavLink
+              to="/portal/settings"
+              onClick={() => setMobileOpen(false)}
+              className={({ isActive }) =>
+                [
+                  "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[13px] transition",
+                  isActive
+                    ? "bg-[#2a3342] text-white"
+                    : "text-[#8b95a6] hover:bg-[#263041] hover:text-white",
+                ].join(" ")
+              }
             >
               <Settings size={16} />
               Settings
-            </button>
+            </NavLink>
             <button
               type="button"
               className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[13px] text-[#8b95a6] transition hover:bg-[#263041] hover:text-white"

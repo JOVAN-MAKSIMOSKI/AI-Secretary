@@ -1,32 +1,9 @@
 // MCP tool — Gmail API integration for sending invoices/offers to clients
-// Requires GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN env vars
+// Uses per-user OAuth token connections stored in the database.
 
 import { google } from 'googleapis';
 import { supabase } from '../lib/supabase.js';
-
-function getGmailAuth() {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
-
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error(
-      'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN are required for Gmail sending.'
-    );
-  }
-
-  const oauth2Client = new google.auth.OAuth2(
-    clientId,
-    clientSecret,
-    process.env.GOOGLE_REDIRECT_URL || 'http://localhost:3000/auth/google/callback'
-  );
-
-  oauth2Client.setCredentials({
-    refresh_token: refreshToken,
-  });
-
-  return oauth2Client;
-}
+import { buildGmailAuthClient, GmailReconnectRequiredError } from '../lib/gmailOAuth.js';
 
 function toBase64Url(input: Buffer): string {
   return input
@@ -73,10 +50,14 @@ function buildMimeMessage(params: {
   return toBase64Url(Buffer.from(mime, 'utf-8'));
 }
 
-export async function sendGmailTestEmail(to: string = 'test@example.com') {
-  const auth = getGmailAuth();
+export async function sendGmailTestEmail(
+  tenantId: string,
+  userAuthId: string,
+  to: string = 'test@example.com',
+) {
+  const { auth, googleEmail } = await buildGmailAuthClient(tenantId, userAuthId);
   const gmail = google.gmail({ version: 'v1', auth });
-  const from = process.env.GMAIL_FROM_EMAIL || process.env.GOOGLE_SENDER_EMAIL || 'me';
+  const from = process.env.GMAIL_FROM_EMAIL || process.env.GOOGLE_SENDER_EMAIL || googleEmail || 'me';
 
   const raw = buildMimeMessage({
     from,
@@ -130,11 +111,19 @@ async function getDocumentBuffer(
  */
 export async function sendDocumentToClient(
   tenantId: string,
+  userAuthId: string,
   clientId: string,
   documentId: string,
   documentType: 'invoice' | 'offer'
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
+    if (userAuthId !== tenantId) {
+      return {
+        success: false,
+        error: 'Cross-tenant sending is not allowed for this authenticated user.',
+      };
+    }
+
     const businessResponse = await supabase
       .from('businesses')
       .select('id,name,email,owner_auth_id')
@@ -225,9 +214,13 @@ Best regards,
 ${business.name}
     `.trim();
 
-    const auth = getGmailAuth();
+    const { auth, googleEmail } = await buildGmailAuthClient(tenantId, userAuthId);
     const gmail = google.gmail({ version: 'v1', auth });
-    const from = process.env.GMAIL_FROM_EMAIL || process.env.GOOGLE_SENDER_EMAIL || String(business.email || 'me');
+    const from =
+      process.env.GMAIL_FROM_EMAIL ||
+      process.env.GOOGLE_SENDER_EMAIL ||
+      googleEmail ||
+      String(business.email || 'me');
 
     const raw = buildMimeMessage({
       from,
@@ -258,6 +251,13 @@ ${business.name}
       messageId: result.data.id || undefined,
     };
   } catch (error) {
+    if (error instanceof GmailReconnectRequiredError) {
+      return {
+        success: false,
+        error: `${error.message} Please reconnect Gmail.`,
+      };
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     return {
       success: false,

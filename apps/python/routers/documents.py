@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from postgrest.exceptions import APIError
 
 from models.documents import DocumentResponse, ExtractionRequest, ExtractionResponse, InvoiceRequest
+from langchain import run_calendar_event_extraction, run_offer_extraction
 from services.invoices.excel import (
     extract_invoice_fields_from_message,
     fetch_invoice_template_payload,
@@ -140,6 +141,62 @@ def extract_from_raw_message(
 
     logger.info(
         "Invoice extraction payload user_id=%s extracted=%s",
+        current_user_id,
+        json.dumps(extracted, ensure_ascii=True),
+    )
+
+    return ExtractionResponse(extracted=extracted)
+
+
+@router.post("/extract-calendar", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
+def extract_calendar_from_raw_message(
+    payload: ExtractionRequest,
+    current_user_id: str = Depends(get_current_user_id),
+) -> ExtractionResponse:
+    """Run the calendar extraction chain against the raw message text."""
+    try:
+        extracted = run_calendar_event_extraction(payload.message)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Calendar extraction chain failed: {exc}",
+        ) from exc
+
+    logger.info(
+        "Calendar extraction payload user_id=%s extracted=%s",
+        current_user_id,
+        json.dumps(extracted, ensure_ascii=True),
+    )
+
+    return ExtractionResponse(extracted=extracted)
+
+
+@router.post("/extract-offer", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
+def extract_offer_from_raw_message(
+    payload: ExtractionRequest,
+    current_user_id: str = Depends(get_current_user_id),
+) -> ExtractionResponse:
+    """Run the offer extraction chain against the raw message text."""
+    try:
+        extracted = run_offer_extraction(payload.message)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Offer extraction chain failed: {exc}",
+        ) from exc
+
+    logger.info(
+        "Offer extraction payload user_id=%s extracted=%s",
         current_user_id,
         json.dumps(extracted, ensure_ascii=True),
     )

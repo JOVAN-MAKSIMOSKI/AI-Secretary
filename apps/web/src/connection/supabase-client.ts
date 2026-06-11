@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { z } from "zod";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabasePublicKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -25,6 +26,7 @@ export const supabase: any =
   }));
 
 const pythonApiBaseUrl = import.meta.env.VITE_PYTHON_API_BASE_URL ?? "/python-api";
+const agentApiBaseUrl = import.meta.env.VITE_AGENT_API_BASE_URL ?? "/agent-api";
 const REQUEST_TIMEOUT_MS = 15000;
 
 async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -147,7 +149,44 @@ export type BusinessProfileResponse = {
   created_at: string | null;
 };
 
+export type GmailConnectionStatusResponse = {
+  connected: boolean;
+  tenantId: string;
+  googleEmail: string | null;
+  scopes: string[];
+  updatedAt: string | null;
+};
+
+export type GmailConnectUrlResponse = {
+  url: string;
+  tenantId: string;
+};
+
+export type CalendarEventResponse = {
+  eventId: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  attendees: string[];
+  description?: string;
+};
+
+export type TaskResponse = {
+  id: string;
+  tenant_id: string;
+  title: string;
+  notes: string | null;
+  due_at: string | null;
+  status: "pending" | "completed";
+  created_at: string;
+  updated_at: string;
+};
+
 const CLIENTS_CACHE_TTL_MS = 60_000;
+const TASKS_CACHE_TTL_MS = 60_000;
+const CALENDAR_EVENTS_CACHE_TTL_MS = 300_000;
+const CALENDAR_EVENTS_CACHE_KEY = "ai-secretary:calendar-events:v1";
+const TASKS_CACHE_KEY = "ai-secretary:tasks:v1";
 
 type ClientsCache = {
   data: ClientResponse[];
@@ -156,8 +195,110 @@ type ClientsCache = {
 
 let clientsCache: ClientsCache | null = null;
 
+type TasksCache = {
+  data: TaskResponse[];
+  fetchedAt: number;
+};
+
+let tasksCache: TasksCache | null = null;
+
+type CalendarEventsCache = {
+  data: CalendarEventResponse[];
+  fetchedAt: number;
+};
+
+function readJsonCache<T>(key: string): { data: T; fetchedAt: number } | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as { data?: T; fetchedAt?: number };
+    if (!parsed || !parsed.data || typeof parsed.fetchedAt !== "number") {
+      return null;
+    }
+
+    return {
+      data: parsed.data,
+      fetchedAt: parsed.fetchedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeJsonCache<T>(key: string, payload: { data: T; fetchedAt: number }): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota and serialization failures.
+  }
+}
+
+export function getCachedCalendarEvents(): CalendarEventResponse[] {
+  const cached = readJsonCache<CalendarEventResponse[]>(CALENDAR_EVENTS_CACHE_KEY);
+  if (!cached) {
+    return [];
+  }
+
+  if (Date.now() - cached.fetchedAt > CALENDAR_EVENTS_CACHE_TTL_MS) {
+    return [];
+  }
+
+  return cached.data;
+}
+
+export function setCachedCalendarEvents(data: CalendarEventResponse[]): void {
+  writeJsonCache(CALENDAR_EVENTS_CACHE_KEY, {
+    data,
+    fetchedAt: Date.now(),
+  });
+}
+
+export function clearCachedCalendarEvents(): void {
+  try {
+    window.localStorage.removeItem(CALENDAR_EVENTS_CACHE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function getCachedTasks(): TaskResponse[] {
+  const cached = readJsonCache<TaskResponse[]>(TASKS_CACHE_KEY);
+  if (!cached) {
+    return [];
+  }
+
+  if (Date.now() - cached.fetchedAt > TASKS_CACHE_TTL_MS) {
+    return [];
+  }
+
+  return cached.data;
+}
+
+export function setCachedTasks(data: TaskResponse[]): void {
+  writeJsonCache(TASKS_CACHE_KEY, {
+    data,
+    fetchedAt: Date.now(),
+  });
+}
+
+export function clearCachedTasks(): void {
+  try {
+    window.localStorage.removeItem(TASKS_CACHE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export function clearClientsCache(): void {
   clientsCache = null;
+}
+
+export function clearTasksCache(): void {
+  tasksCache = null;
+  clearCachedTasks();
 }
 
 async function getAccessToken(): Promise<string> {
@@ -176,6 +317,243 @@ async function getAuthHeaders(extraHeaders?: HeadersInit): Promise<HeadersInit> 
     ...(extraHeaders ?? {}),
     Authorization: `Bearer ${accessToken}`,
   };
+}
+
+async function extractErrorDetail(response: Response, fallbackMessage: string): Promise<string> {
+  let detail = fallbackMessage;
+  try {
+    const data = (await response.json()) as { detail?: string; error?: string };
+    if (typeof data?.detail === "string" && data.detail) {
+      detail = data.detail;
+    } else if (typeof data?.error === "string" && data.error) {
+      detail = data.error;
+    }
+  } catch {
+    // Keep fallback error message when response body is not JSON.
+  }
+
+  return detail;
+}
+
+export async function getGmailConnectionStatus(): Promise<GmailConnectionStatusResponse> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/auth/google/gmail/status`, {
+    method: "GET",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to fetch Gmail connection status."));
+  }
+
+  return (await response.json()) as GmailConnectionStatusResponse;
+}
+
+export async function getGmailConnectUrl(returnTo?: string): Promise<GmailConnectUrlResponse> {
+  const headers = await getAuthHeaders();
+  const target = new URL(`${agentApiBaseUrl}/auth/google/gmail/connect`, window.location.origin);
+  if (returnTo) {
+    target.searchParams.set("returnTo", returnTo);
+  }
+
+  const response = await fetchWithTimeout(target.toString(), {
+    method: "GET",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to initiate Gmail connect."));
+  }
+
+  return (await response.json()) as GmailConnectUrlResponse;
+}
+
+export async function disconnectGmailConnection(): Promise<{ disconnected: boolean; revoked: boolean }> {
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/auth/google/gmail/disconnect`, {
+    method: "POST",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to disconnect Gmail."));
+  }
+
+  return (await response.json()) as { disconnected: boolean; revoked: boolean };
+}
+
+export async function listCalendarEvents(params?: {
+  timeMin?: string;
+  timeMax?: string;
+  maxResults?: number;
+}): Promise<CalendarEventResponse[]> {
+  const headers = await getAuthHeaders();
+  const target = new URL(`${agentApiBaseUrl}/calendar/events`, window.location.origin);
+
+  if (params?.timeMin) {
+    target.searchParams.set("timeMin", params.timeMin);
+  }
+  if (params?.timeMax) {
+    target.searchParams.set("timeMax", params.timeMax);
+  }
+  if (typeof params?.maxResults === "number") {
+    target.searchParams.set("maxResults", String(params.maxResults));
+  }
+
+  const response = await fetchWithTimeout(target.toString(), {
+    method: "GET",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to fetch calendar events."));
+  }
+
+  const data = (await response.json()) as { events?: CalendarEventResponse[] };
+  const events = data.events ?? [];
+  setCachedCalendarEvents(events);
+  return events;
+}
+
+export async function createCalendarEvent(payload: {
+  title: string;
+  startTime: string;
+  endTime: string;
+  description?: string;
+  attendeeEmails?: string[];
+}): Promise<CalendarEventResponse> {
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/calendar/events`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to create calendar event."));
+  }
+
+  const created = (await response.json()) as CalendarEventResponse;
+  const cached = getCachedCalendarEvents();
+  setCachedCalendarEvents([...cached, created]);
+  return created;
+}
+
+export async function deleteCalendarEvent(eventId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/calendar/events/${encodeURIComponent(eventId)}`, {
+    method: "DELETE",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to delete calendar event."));
+  }
+
+  const cached = getCachedCalendarEvents().filter((event) => event.eventId !== eventId);
+  setCachedCalendarEvents(cached);
+}
+
+export async function listTasks(options?: {
+  status?: "pending" | "completed";
+  forceRefresh?: boolean;
+}): Promise<TaskResponse[]> {
+  const now = Date.now();
+  if (
+    !options?.forceRefresh &&
+    !options?.status &&
+    tasksCache !== null &&
+    now - tasksCache.fetchedAt < TASKS_CACHE_TTL_MS
+  ) {
+    return tasksCache.data;
+  }
+
+  const headers = await getAuthHeaders();
+  const target = new URL(`${agentApiBaseUrl}/tasks`, window.location.origin);
+  if (options?.status) {
+    target.searchParams.set("status", options.status);
+  }
+
+  const response = await fetchWithTimeout(target.toString(), {
+    method: "GET",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to fetch tasks."));
+  }
+
+  const data = (await response.json()) as { tasks?: TaskResponse[] };
+  const tasks = data.tasks ?? [];
+
+  if (!options?.status) {
+    tasksCache = {
+      data: tasks,
+      fetchedAt: Date.now(),
+    };
+    setCachedTasks(tasks);
+  }
+
+  return tasks;
+}
+
+export async function createTask(payload: {
+  title: string;
+  notes?: string;
+  dueAt?: string;
+}): Promise<TaskResponse> {
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/tasks`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to create task."));
+  }
+
+  const created = (await response.json()) as TaskResponse;
+  const cached = getCachedTasks();
+  setCachedTasks([...cached, created]);
+  tasksCache = null;
+  return created;
+}
+
+export async function updateTask(
+  taskId: string,
+  payload: Partial<{ title: string; notes: string | null; dueAt: string | null; status: "pending" | "completed" }>
+): Promise<TaskResponse> {
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to update task."));
+  }
+
+  const updated = (await response.json()) as TaskResponse;
+  setCachedTasks(getCachedTasks().map((task) => (task.id === taskId ? updated : task)));
+  tasksCache = null;
+  return updated;
+}
+
+export async function deleteTask(taskId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/tasks/${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to delete task."));
+  }
+
+  setCachedTasks(getCachedTasks().filter((task) => task.id !== taskId));
+  tasksCache = null;
 }
 
 export async function createClientProfile(payload: ClientCreateRequest): Promise<ClientResponse> {
@@ -510,7 +888,42 @@ export type ExtractedInvoiceFromMessage = {
   };
 };
 
-export async function extractDashboardMessage(message: string): Promise<ExtractedInvoiceFromMessage> {
+export type ResolvedDashboardChainId =
+  | "invoice_extraction"
+  | "offer_extraction"
+  | "calendar_event_extraction";
+
+export type DashboardResolveAndRunResponse = {
+  tenantId: string;
+  userAuthId: string;
+  resolvedChainId: ResolvedDashboardChainId;
+  resolverConfidence: number;
+  resolverReason: string;
+  resolverMissingInfo: string[];
+  result: {
+    extracted?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+};
+
+const calendarExtractionSchema = z
+  .object({
+    event_name: z.string().min(1),
+    event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    event_time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+    duration_minutes: z.number().int().min(1).max(480).optional().default(15),
+  })
+  .strict();
+
+const calendarBookingResultSchema = z
+  .object({
+    success: z.boolean(),
+    message: z.string().min(1),
+    eventId: z.string().optional(),
+  })
+  .strict();
+
+export async function extractDashboardMessage(message: string): Promise<DashboardResolveAndRunResponse> {
   const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 
   const controller = new AbortController();
@@ -518,7 +931,7 @@ export async function extractDashboardMessage(message: string): Promise<Extracte
 
   let response: Response;
   try {
-    response = await fetch(`${pythonApiBaseUrl}/documents/extract`, {
+    response = await fetch(`${agentApiBaseUrl}/agent/resolve-and-run`, {
       method: "POST",
       headers,
       body: JSON.stringify({ message }),
@@ -534,10 +947,12 @@ export async function extractDashboardMessage(message: string): Promise<Extracte
   }
 
   if (!response.ok) {
-    let detail = "Extraction request failed.";
+    let detail = "Resolver request failed.";
     try {
-      const data = (await response.json()) as { detail?: string };
-      if (data?.detail) {
+      const data = (await response.json()) as { detail?: string; error?: string };
+      if (typeof data?.error === "string" && data.error) {
+        detail = data.error;
+      } else if (typeof data?.detail === "string" && data.detail) {
         detail = data.detail;
       }
     } catch {
@@ -546,8 +961,30 @@ export async function extractDashboardMessage(message: string): Promise<Extracte
     throw new Error(detail);
   }
 
-  const data = (await response.json()) as { extracted: ExtractedInvoiceFromMessage };
-  return data.extracted ?? {};
+  const payload = (await response.json()) as DashboardResolveAndRunResponse;
+
+  if (payload.resolvedChainId === "calendar_event_extraction") {
+    const parsed = calendarBookingResultSchema.safeParse(payload.result);
+    if (!parsed.success) {
+      throw new Error(
+        "Calendar booking returned an invalid payload. Expected success and message fields."
+      );
+    }
+
+    payload.result = parsed.data;
+  }
+
+  if (payload.resolvedChainId !== "calendar_event_extraction") {
+    const extracted = payload.result?.extracted;
+    if (extracted) {
+      const maybeCalendarExtract = calendarExtractionSchema.safeParse(extracted);
+      if (maybeCalendarExtract.success) {
+        payload.result.extracted = maybeCalendarExtract.data;
+      }
+    }
+  }
+
+  return payload;
 }
 
 export async function queryLawDocuments(question: string, topK = 5): Promise<string> {

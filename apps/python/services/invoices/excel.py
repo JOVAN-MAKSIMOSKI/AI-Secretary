@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 
 from services.invoices.calculations import apply_invoice_price_calculations
 from services.invoices.client_lookup import fetch_client_contact_from_extracted
-from services.langchain import run_invoice_extraction
+from langchain import run_invoice_extraction
 from services.storage import supabase
 
 

@@ -9,6 +9,7 @@ import PortalClients from "./pages/portal/Clients";
 import PortalDashboard from "./pages/portal/Dashboard";
 import PortalDocuments from "./pages/portal/Documents";
 import PortalLawQuestions from "./pages/portal/LawQuestions";
+import PortalSettings from "./pages/portal/Settings";
 import { PublicOnly, RequireAuth } from "./router/guards";
 
 export default function App() {
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="documents" element={<PortalDocuments />} />
           <Route path="calendar" element={<PortalCalendar />} />
           <Route path="law-questions" element={<PortalLawQuestions />} />
+          <Route path="settings" element={<PortalSettings />} />
         </Route>
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

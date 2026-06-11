@@ -2,24 +2,25 @@
 
 import { google, calendar_v3 } from 'googleapis';
 import { prisma } from '../lib/prisma.js';
+import { buildGmailAuthClient, GmailReconnectRequiredError } from '../lib/gmailOAuth.js';
 
 const calendarApi = google.calendar('v3');
+const DEFAULT_BUSINESS_TIMEZONE = 'Europe/Skopje';
 
-/**
- * Initialize Google Calendar OAuth2 client with stored credentials
- */
-function getCalendarAuth() {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URL || 'http://localhost:3000/auth/google/callback'
-  );
+function normalizeCalendarDateTime(value: string): string {
+  const trimmed = value.trim();
+  // Local wall-time form used by resolver, interpreted with DEFAULT_BUSINESS_TIMEZONE.
+  const localPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+  if (localPattern.test(trimmed)) {
+    return trimmed.length === 16 ? `${trimmed}:00` : trimmed;
+  }
 
-  oauth2Client.setCredentials({
-    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-  });
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error('Datetime must be a valid ISO string or local YYYY-MM-DDTHH:mm:ss value.');
+  }
 
-  return oauth2Client;
+  return parsed.toISOString();
 }
 
 export interface AvailableSlot {
@@ -28,11 +29,176 @@ export interface AvailableSlot {
   duration: number; // in minutes
 }
 
+export interface CalendarEventRecord {
+  eventId: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  attendees: string[];
+  description?: string;
+}
+
+export async function listCalendarEvents(
+  tenantId: string,
+  userAuthId: string,
+  options?: {
+    timeMin?: string;
+    timeMax?: string;
+    maxResults?: number;
+  }
+): Promise<CalendarEventRecord[]> {
+  try {
+    const business = await prisma.businesses.findUnique({
+      where: { owner_auth_id: tenantId },
+      select: { owner_auth_id: true },
+    });
+
+    if (!business) {
+      throw new Error(`Tenant '${tenantId}' not found`);
+    }
+
+    const { auth } = await buildGmailAuthClient(tenantId, userAuthId);
+    const events = await calendarApi.events.list({
+      auth,
+      calendarId: 'primary',
+      timeMin: options?.timeMin ?? new Date().toISOString(),
+      timeMax: options?.timeMax,
+      maxResults: options?.maxResults ?? 100,
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+
+    return (events.data.items || [])
+      .filter((event) => Boolean(event.id))
+      .map((event) => ({
+        eventId: event.id || '',
+        title: event.summary || 'Untitled',
+        startTime: event.start?.dateTime || event.start?.date || '',
+        endTime: event.end?.dateTime || event.end?.date || '',
+        attendees: (event.attendees || []).map((a) => a.email || '').filter(Boolean),
+        description: event.description || undefined,
+      }))
+      .filter((event) => Boolean(event.startTime));
+  } catch (error) {
+    if (error instanceof GmailReconnectRequiredError) {
+      throw new Error(`Failed to list calendar events: ${error.message} Please reconnect Google.`);
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to list calendar events: ${message}`);
+  }
+}
+
+export async function createCalendarEvent(
+  tenantId: string,
+  userAuthId: string,
+  input: {
+    title: string;
+    startTime: string;
+    endTime?: string;
+    durationMinutes?: number;
+    description?: string;
+    attendeeEmails?: string[];
+  }
+): Promise<CalendarEventRecord> {
+  try {
+    const business = await prisma.businesses.findUnique({
+      where: { owner_auth_id: tenantId },
+      select: { owner_auth_id: true },
+    });
+
+    if (!business) {
+      throw new Error(`Tenant '${tenantId}' not found`);
+    }
+
+    const { auth } = await buildGmailAuthClient(tenantId, userAuthId);
+
+    const normalizedStartDateTime = normalizeCalendarDateTime(input.startTime);
+
+    const resolvedDurationMinutes = Number.isFinite(input.durationMinutes)
+      ? Math.max(1, Math.floor(Number(input.durationMinutes)))
+      : 15;
+    const resolvedEndDateTime = input.endTime
+      ? normalizeCalendarDateTime(input.endTime)
+      : new Date(new Date(normalizedStartDateTime).getTime() + resolvedDurationMinutes * 60_000).toISOString();
+
+    const event: calendar_v3.Schema$Event = {
+      summary: input.title,
+      description: input.description,
+      start: {
+        dateTime: normalizedStartDateTime,
+        timeZone: DEFAULT_BUSINESS_TIMEZONE,
+      },
+      end: {
+        dateTime: resolvedEndDateTime,
+        timeZone: DEFAULT_BUSINESS_TIMEZONE,
+      },
+      attendees: (input.attendeeEmails || []).map((email) => ({ email })),
+    };
+
+    const result = await calendarApi.events.insert({
+      auth,
+      calendarId: 'primary',
+      requestBody: event,
+      sendUpdates: 'all',
+    });
+
+    return {
+      eventId: result.data.id || '',
+      title: result.data.summary || input.title,
+      startTime: result.data.start?.dateTime || result.data.start?.date || input.startTime,
+      endTime: result.data.end?.dateTime || result.data.end?.date || resolvedEndDateTime,
+      attendees: (result.data.attendees || []).map((a) => a.email || '').filter(Boolean),
+      description: result.data.description || input.description,
+    };
+  } catch (error) {
+    if (error instanceof GmailReconnectRequiredError) {
+      throw new Error(`Failed to create calendar event: ${error.message} Please reconnect Google.`);
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to create calendar event: ${message}`);
+  }
+}
+
+export async function deleteCalendarEvent(
+  tenantId: string,
+  userAuthId: string,
+  eventId: string
+): Promise<void> {
+  try {
+    const business = await prisma.businesses.findUnique({
+      where: { owner_auth_id: tenantId },
+      select: { owner_auth_id: true },
+    });
+
+    if (!business) {
+      throw new Error(`Tenant '${tenantId}' not found`);
+    }
+
+    const { auth } = await buildGmailAuthClient(tenantId, userAuthId);
+    await calendarApi.events.delete({
+      auth,
+      calendarId: 'primary',
+      eventId,
+      sendUpdates: 'all',
+    });
+  } catch (error) {
+    if (error instanceof GmailReconnectRequiredError) {
+      throw new Error(`Failed to delete calendar event: ${error.message} Please reconnect Google.`);
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to delete calendar event: ${message}`);
+  }
+}
+
 /**
  * Check availability in the owner's calendar for a given date range
  */
 export async function checkCalendarAvailability(
   tenantId: string,
+  userAuthId: string,
   dateStart: string, // ISO format
   dateEnd: string, // ISO format
   durationMinutes: number = 60
@@ -47,7 +213,7 @@ export async function checkCalendarAvailability(
       throw new Error(`Tenant '${tenantId}' not found`);
     }
 
-    const auth = getCalendarAuth();
+    const { auth } = await buildGmailAuthClient(tenantId, userAuthId);
 
     // List busy times from primary calendar
     const busyTimes = await calendarApi.freebusy.query({
@@ -80,6 +246,10 @@ export async function checkCalendarAvailability(
       })),
     };
   } catch (error) {
+    if (error instanceof GmailReconnectRequiredError) {
+      throw new Error(`Failed to check calendar availability: ${error.message} Please reconnect Google.`);
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to check calendar availability: ${message}`);
   }
@@ -90,6 +260,7 @@ export async function checkCalendarAvailability(
  */
 export async function scheduleMeeting(
   tenantId: string,
+  userAuthId: string,
   clientId: string,
   title: string,
   startTime: string, // ISO format
@@ -115,7 +286,7 @@ export async function scheduleMeeting(
       return { success: false, error: `Client '${clientId}' not found for this tenant` };
     }
 
-    const auth = getCalendarAuth();
+    const { auth } = await buildGmailAuthClient(tenantId, userAuthId);
     const start = new Date(startTime);
     const end = new Date(start.getTime() + durationMinutes * 60000);
 
@@ -124,11 +295,11 @@ export async function scheduleMeeting(
       description: description || `Meeting with ${client.name}`,
       start: {
         dateTime: start.toISOString(),
-        timeZone: 'UTC',
+        timeZone: DEFAULT_BUSINESS_TIMEZONE,
       },
       end: {
         dateTime: end.toISOString(),
-        timeZone: 'UTC',
+        timeZone: DEFAULT_BUSINESS_TIMEZONE,
       },
       attendees: [
         { email: business.email, organizer: true, responseStatus: 'accepted' },
@@ -155,6 +326,13 @@ export async function scheduleMeeting(
       eventId: result.data.id ?? undefined,
     };
   } catch (error) {
+    if (error instanceof GmailReconnectRequiredError) {
+      return {
+        success: false,
+        error: `${error.message} Please reconnect Google to enable Calendar access.`,
+      };
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     return {
       success: false,
@@ -168,6 +346,7 @@ export async function scheduleMeeting(
  */
 export async function listUpcomingMeetings(
   tenantId: string,
+  userAuthId: string,
   limit: number = 10
 ): Promise<
   Array<{
@@ -188,7 +367,7 @@ export async function listUpcomingMeetings(
       throw new Error(`Tenant '${tenantId}' not found`);
     }
 
-    const auth = getCalendarAuth();
+    const { auth } = await buildGmailAuthClient(tenantId, userAuthId);
 
     const events = await calendarApi.events.list({
       auth,
@@ -207,6 +386,10 @@ export async function listUpcomingMeetings(
       attendees: (event.attendees || []).map((a) => a.email || ''),
     }));
   } catch (error) {
+    if (error instanceof GmailReconnectRequiredError) {
+      throw new Error(`Failed to list meetings: ${error.message} Please reconnect Google.`);
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to list meetings: ${message}`);
   }

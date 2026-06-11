@@ -5,6 +5,10 @@ export interface AgentState {
   clientId: string;
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   currentAction: 'idle' | 'planning' | 'resolving' | 'executing' | 'auditing';
+  resolvedChainId?: 'invoice_extraction' | 'offer_extraction' | 'calendar_event_extraction';
+  resolverConfidence?: number;
+  resolverReason?: string;
+  resolverMissingInfo?: string[];
   approvalGate: {
     pending: boolean;
     action: string;
