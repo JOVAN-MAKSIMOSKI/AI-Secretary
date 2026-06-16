@@ -1,54 +1,18 @@
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useAppContextStore } from "../../store/app-context";
 import { useSessionStore } from "../../store/session";
 import { queryLawDocuments } from "../../connection/supabase-client";
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  createdAt: string;
-};
-
-const LAW_CHAT_STORAGE_PREFIX = "law-questions-chat-v1";
-
-function getLawChatStorageKey(tenantId: string | null) {
-  return `${LAW_CHAT_STORAGE_PREFIX}:${tenantId ?? "anonymous"}`;
-}
+import { useLawChat, type ChatMessage } from "../../hooks/useAgent";
 
 export default function LawQuestions() {
   const tenantId = useSessionStore((state) => state.tenantId);
   const userEmail = useAppContextStore((state) => state.userEmail);
   const tenantIdentifier = tenantId;
-  const chatStorageKey = useMemo(() => getLawChatStorageKey(tenantIdentifier), [tenantIdentifier]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { messages, addMessage, clearMessages } = useLawChat();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(chatStorageKey);
-      if (!raw) {
-        setMessages([]);
-        return;
-      }
-
-      const parsed = JSON.parse(raw) as ChatMessage[];
-      if (Array.isArray(parsed)) {
-        setMessages(parsed);
-      } else {
-        setMessages([]);
-      }
-    } catch {
-      setMessages([]);
-    }
-  }, [chatStorageKey]);
-
-  useEffect(() => {
-    window.localStorage.setItem(chatStorageKey, JSON.stringify(messages));
-  }, [chatStorageKey, messages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -68,7 +32,7 @@ export default function LawQuestions() {
       createdAt: new Date().toISOString(),
     };
 
-    setMessages((current) => [...current, userMessage]);
+    addMessage(userMessage);
     setInput("");
     setIsLoading(true);
     setError(null);
@@ -81,7 +45,7 @@ export default function LawQuestions() {
         content: answer,
         createdAt: new Date().toISOString(),
       };
-      setMessages((current) => [...current, assistantMessage]);
+      addMessage(assistantMessage);
     } catch (err) {
       setError((err as Error).message ?? "Something went wrong. Please try again.");
     } finally {
@@ -99,7 +63,7 @@ export default function LawQuestions() {
   };
 
   const clearChat = () => {
-    setMessages([]);
+    clearMessages();
   };
 
   return (

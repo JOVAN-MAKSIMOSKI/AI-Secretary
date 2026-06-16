@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useState } from "react";
 import {
   createInvoiceDocument,
   extractDashboardMessage,
@@ -8,21 +8,7 @@ import {
 } from "../../connection/supabase-client";
 import { useAppContextStore } from "../../store/app-context";
 import { useSessionStore } from "../../store/session";
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  createdAt: string;
-  downloadUrl?: string;
-  downloadLabel?: string;
-};
-
-const CHAT_STORAGE_PREFIX = "dashboard-chat-v1";
-
-function getChatStorageKey(tenantId: string | null) {
-  return `${CHAT_STORAGE_PREFIX}:${tenantId ?? "anonymous"}`;
-}
+import { useDashboardChat, type ChatMessage } from "../../hooks/useAgent";
 
 function formatDateIso(dateValue: string): string {
   const parsed = new Date(dateValue);
@@ -303,35 +289,11 @@ export default function PortalDashboard() {
   const tenantId = useSessionStore((state) => state.tenantId);
   const userEmail = useAppContextStore((state) => state.userEmail);
   const tenantIdentifier = tenantId;
-  const chatStorageKey = useMemo(() => getChatStorageKey(tenantIdentifier), [tenantIdentifier]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { messages, addMessage, clearMessages } = useDashboardChat();
   const [invoiceDraft, setInvoiceDraft] = useState<ExtractedInvoiceFromMessage | null>(null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(chatStorageKey);
-      if (!raw) {
-        setMessages([]);
-        return;
-      }
-
-      const parsed = JSON.parse(raw) as ChatMessage[];
-      if (Array.isArray(parsed)) {
-        setMessages(parsed);
-      } else {
-        setMessages([]);
-      }
-    } catch {
-      setMessages([]);
-    }
-  }, [chatStorageKey]);
-
-  useEffect(() => {
-    window.localStorage.setItem(chatStorageKey, JSON.stringify(messages));
-  }, [chatStorageKey, messages]);
 
   useEffect(() => {
     return () => {
@@ -357,7 +319,7 @@ export default function PortalDashboard() {
       createdAt: new Date().toISOString(),
     };
 
-    setMessages((current) => [...current, newMessage]);
+    addMessage(newMessage);
     setInput("");
     setIsLoading(true);
     setError(null);
@@ -373,7 +335,7 @@ export default function PortalDashboard() {
           content: formatNonInvoiceChainResponse(resolveResponse),
           createdAt: new Date().toISOString(),
         };
-        setMessages((current) => [...current, assistantMessage]);
+        addMessage(assistantMessage);
         return;
       }
 
@@ -390,7 +352,7 @@ export default function PortalDashboard() {
           content: payloadError ?? "I extracted values but could not generate the invoice yet.",
           createdAt: new Date().toISOString(),
         };
-        setMessages((current) => [...current, assistantMessage]);
+        addMessage(assistantMessage);
       } else {
         const result = await createInvoiceDocument(payload);
         const downloadUrl = URL.createObjectURL(result.blob);
@@ -404,7 +366,7 @@ export default function PortalDashboard() {
           downloadUrl,
           downloadLabel: result.filename,
         };
-        setMessages((current) => [...current, assistantMessage]);
+        addMessage(assistantMessage);
       }
     } catch (err) {
       setError((err as Error).message ?? "Failed to run extraction chain.");
@@ -423,7 +385,7 @@ export default function PortalDashboard() {
   };
 
   const clearChat = () => {
-    setMessages([]);
+    clearMessages();
     setInvoiceDraft(null);
   };
 
