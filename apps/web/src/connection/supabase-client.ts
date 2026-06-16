@@ -157,6 +157,11 @@ export type GmailConnectionStatusResponse = {
   updatedAt: string | null;
 };
 
+export type GmailInboxStatsResponse = {
+  unreadCount: number;
+  connected: boolean;
+};
+
 export type GmailConnectUrlResponse = {
   url: string;
   tenantId: string;
@@ -366,6 +371,20 @@ export async function getGmailConnectUrl(returnTo?: string): Promise<GmailConnec
   }
 
   return (await response.json()) as GmailConnectUrlResponse;
+}
+
+export async function getGmailInboxStats(): Promise<GmailInboxStatsResponse> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/gmail/inbox/stats`, {
+    method: "GET",
+    headers,
+  });
+
+  if (!response.ok) {
+    return { unreadCount: 0, connected: false };
+  }
+
+  return (await response.json()) as GmailInboxStatsResponse;
 }
 
 export async function disconnectGmailConnection(): Promise<{ disconnected: boolean; revoked: boolean }> {

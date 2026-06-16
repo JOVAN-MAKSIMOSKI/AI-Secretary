@@ -32,6 +32,7 @@ const DEFAULT_REDIRECT_URI = 'http://localhost:3000/auth/google/gmail/callback';
 const DEFAULT_STATE_TTL_SECONDS = 600;
 
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+export const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 export const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar';
 
 function getGoogleOAuthClient() {
@@ -209,7 +210,7 @@ export async function buildGmailConnectUrl(
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: [GMAIL_SEND_SCOPE, GOOGLE_CALENDAR_SCOPE, 'openid', 'email', 'profile'],
+    scope: [GMAIL_SEND_SCOPE, GMAIL_READONLY_SCOPE, GOOGLE_CALENDAR_SCOPE, 'openid', 'email', 'profile'],
     state,
     include_granted_scopes: true,
   });

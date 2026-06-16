@@ -2,6 +2,9 @@ import { FormEvent, KeyboardEvent, useEffect, useState } from "react";
 import {
   createInvoiceDocument,
   extractDashboardMessage,
+  getGmailInboxStats,
+  listCalendarEvents,
+  type CalendarEventResponse,
   type DashboardResolveAndRunResponse,
   type ExtractedInvoiceFromMessage,
   type InvoiceDocumentRequest,
@@ -285,6 +288,8 @@ function formatNonInvoiceChainResponse(response: DashboardResolveAndRunResponse)
 }
 
 
+const TOMORROW_END_OFFSET_MS = 2 * 24 * 60 * 60 * 1000;
+
 export default function PortalDashboard() {
   const tenantId = useSessionStore((state) => state.tenantId);
   const userEmail = useAppContextStore((state) => state.userEmail);
@@ -294,6 +299,29 @@ export default function PortalDashboard() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [upcomingEvents, setUpcomingEvents] = useState<CalendarEventResponse[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number | null>(null);
+  const [gmailNeedsReconnect, setGmailNeedsReconnect] = useState(false);
+
+  // Fetch upcoming events (today + tomorrow) and unread email count on mount
+  useEffect(() => {
+    const timeMin = new Date().toISOString();
+    const timeMax = new Date(Date.now() + TOMORROW_END_OFFSET_MS).toISOString();
+
+    listCalendarEvents({ timeMin, timeMax, maxResults: 2 })
+      .then(setUpcomingEvents)
+      .catch(() => setUpcomingEvents([]));
+
+    getGmailInboxStats().then((stats) => {
+      if (!stats.connected) {
+        setGmailNeedsReconnect(true);
+        setUnreadCount(null);
+      } else {
+        setUnreadCount(stats.unreadCount);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -401,9 +429,39 @@ export default function PortalDashboard() {
             <p className="text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"} · {tenantIdentifier ?? "Loading..."}</p>
           </div>
           <div className="grid h-[calc(100%-2.25rem)] grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="grid place-items-center rounded-lg border border-dashed border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4 text-xs text-[var(--brand-text-muted)]">Metric card area</div>
-            <div className="grid place-items-center rounded-lg border border-dashed border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4 text-xs text-[var(--brand-text-muted)]">Metric card area</div>
-            <div className="grid place-items-center rounded-lg border border-dashed border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4 text-xs text-[var(--brand-text-muted)]">Metric card area</div>
+            {/* Card 1 — Upcoming calendar events */}
+            <div className="flex flex-col gap-2 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--brand-text-muted)]">Upcoming Events</p>
+              {upcomingEvents.length === 0 ? (
+                <p className="text-xs text-[var(--brand-text-muted)]">No events in the next 2 days.</p>
+              ) : (
+                upcomingEvents.map((event) => (
+                  <div key={event.eventId} className="rounded-md border border-[var(--brand-border)] px-3 py-2">
+                    <p className="truncate text-xs font-medium text-[var(--brand-ink)]">{event.title}</p>
+                    <p className="mt-0.5 text-[10px] text-[var(--brand-text-muted)]">
+                      {new Date(event.startTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Card 2 — Unread email count */}
+            <div className="flex flex-col justify-between rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--brand-text-muted)]">Unread Emails</p>
+              {gmailNeedsReconnect ? (
+                <p className="text-xs text-[var(--brand-text-muted)]">Gmail needs to be reconnected to show unread count.</p>
+              ) : (
+                <p className="text-3xl font-semibold text-[var(--brand-ink)]">
+                  {unreadCount === null ? "—" : unreadCount}
+                </p>
+              )}
+            </div>
+
+            {/* Card 3 — Reserved */}
+            <div className="grid place-items-center rounded-lg border border-dashed border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4 text-xs text-[var(--brand-text-muted)]">
+              Reserved
+            </div>
           </div>
         </div>
       </section>

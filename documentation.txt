@@ -1,16 +1,20 @@
-the word client when asking for a meeting booked or anything outside the invoices is going to return missing units, maybe the word is associated with invoices and the router selects the invoice chain
-I should have 2 chains now, figure out if langgraph if neded and how do I use it, and take a step back to understand the newly written code. There is a plan on how to set up langgraph, after understanding langgraph set it up
-fetch latest gmails into a card metric
-I am not getting good answers, please investigate them.
+MAKE THE DESIGN BETTER
+Fix the long time getting to load a session or something(if needewd check
+)
+AGENT
+Offers, transportni...
+STT
+RAG
+Currently need to console.log everything that comes in from qdrant and debug later on, there is a script inside /services, run it to diagnose the issues, maybe an embedding model used is not good enough.
 decide exactly what should be done with the agent memory and how to keep the chat exactly.
 query engine built by the service? What happens?  investigate the service deeper.
-set invoice number logic
+The chat needs to be kept in
 
-implement excel logic(claude contains the prompt)!
-there is a logic about the calendar functionality in the pinned chat
+
+
 ensure RLS security is set up properly
 add indexes for performance when querying
-time zone is fixed
+time zone stays fixed
 consider adding a stronger LLM once finishing the app because request in macedonian might be a problem for the current ollama model.
 
 *Add system prompts in the routers (or a dedicated services/prompts.py file) where you know the context.
@@ -31,28 +35,14 @@ With memory: agent knows the last email was formal,
 
 
 
-FRONT END 
-Calendar tool can be displayed, meetings can be set manually in the UI, they just shouldnt be calling the MCPtool directly because of secret env variables.
+
 
 
 
 fix the readme inside github to match athlys readme
 
-
-
-
-SEND INVOICE TO CLIENT
-
-cd /c/Users/Jovan/Desktop/AI-Secretary/apps/agent && pnpm exec tsx -e "
-import { sendDocumentToClient } from './src/mcp/gmail.ts';
-(async () => {
-  const result = await sendDocumentToClient(tenantId, userAuthId, clientId, documentId, 'invoice');
-  console.log(JSON.stringify(result, null, 2));
-})();
-
 .venv/Scripts/uvicorn main:app --reload --host 0.0.0.0 --port 8000
-cd /c/Users/Jovan/Desktop/AI-Secretary/apps/python
-python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
 
 In a second terminal, open the FastAPI interactive test client (Swagger UI)
 cmd.exe /c start http://127.0.0.1:8000/docs
@@ -60,44 +50,21 @@ cmd.exe /c start http://127.0.0.1:8000/docs
 Optional: open ReDoc
 cmd.exe /c start http://127.0.0.1:8000/redoc
 
-Front end needs supabase connection and auth implementation
-Semantic search isnt needed in the first plan for the invoices retrival it can be done with a regular query.
+
 Semantic search could be added for the word offers/
 
-start the front end
-Run this from web:
-pnpm dev
 
 
-GMAIL SETUP (REVERTED FROM SMTP TO GMAIL API)
 
-The email sender now uses Gmail API OAuth (not SMTP).
-Required env vars in apps/agent:
-- GOOGLE_CLIENT_ID
-- GOOGLE_CLIENT_SECRET
-- GOOGLE_REDIRECT_URL (optional, defaults to http://localhost:3000/auth/google/gmail/callback)
-- GMAIL_TOKEN_ENCRYPTION_KEY (32-byte base64 or 64-char hex)
-- GMAIL_OAUTH_STATE_SECRET
-- GMAIL_FROM_EMAIL (optional, fallback sender header)
 
-Scopes needed when generating refresh token:
-- https://www.googleapis.com/auth/gmail.send
-- https://www.googleapis.com/auth/calendar
 
-Quick test command from apps/agent:
-pnpm exec tsx -e "
-import { sendSmtpTestEmail } from './src/mcp/gmail.ts';
-(async () => {
-  const result = await sendSmtpTestEmail(tenantId, userAuthId, 'your-test-email@example.com');
-  console.log(JSON.stringify(result, null, 2));
-})();
-"
+How the "Big Players" Do ItEnterprise apps (like Slack, Microsoft Teams, or custom AI agents) use a hybrid approach:The Source of Truth (Server): All chats are stored in a secure, relational or NoSQL database. This ensures data is backed up, encrypted, and available everywhere.The Cache (Client/Redis): They use "hot" caches (like Redis on the server or IndexedDB in the browser) to make the chat feel instant.IndexedDB is the professional version of localStorage. It is asynchronous, supports large amounts of data, and handles structured queries. If you must store data on the client side, use IndexedDB, not localStorage.Synchronization: The frontend requests the latest messages from the API, and the server validates the user's session before sending the data.My Recommendation for Your "AI-Secretary"  Since you are currently in the "building/MVP" phase, using localStorage with your Zustand store is perfectly acceptable for local testing and rapid iteration. It gets your UI working today without needing to write complex database migrations.However, add a "Migration Path" to your plan:Don't build your entire product architecture around localStorage. Treat the localStorage implementation as a temporary UI cache. Eventually, when you decide to take the app to production, you can simply swap out your store/chat.ts persistence layer to fetch from an API endpoint instead of the browser's storage, and your UI components won't even know the difference!
+set up railway when developing 
 
-Send invoice command (existing flow):
-pnpm exec tsx -e "
-import { sendDocumentToClient } from './src/mcp/gmail.ts';
-(async () => {
-  const result = await sendDocumentToClient(tenantId, userAuthId, clientId, documentId, 'invoice');
-  console.log(JSON.stringify(result, null, 2));
-})();
-"
+or each proposed change you get:
+
+y — yes, apply it
+n — no, skip it
+d — show a more detailed diff before deciding
+a — accept all remaining changes in this batch
+e — open the file in your editor to review before decidingd

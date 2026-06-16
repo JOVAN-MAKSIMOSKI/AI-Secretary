@@ -56,12 +56,82 @@ _PROMPT_INJECTION_PATTERNS = [
 
 _DATE_ISO_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TIME_24H_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_CYRILLIC_PATTERN = re.compile(r"[\u0400-\u04FF]")
+
+# Macedonian tokens stripped when extracting event_name from the raw message.
+_MK_BOOKING_VERBS = re.compile(
+    r"\b(?:\u0437\u0430\u043A\u0430\u0436\u0438|\u043D\u0430\u043F\u0440\u0430\u0432\u0438|\u0440\u0435\u0437\u0435\u0440\u0432\u0438\u0440\u0430\u0458|\u043F\u043E\u0441\u0442\u0430\u0432\u0438|\u0434\u043E\u0434\u0430\u0458|\u0441\u043E\u0437\u0434\u0430\u0434\u0438|\u0437\u0430\u043F\u0438\u0448\u0438|\u0437\u0430\u043A\u0430\u0436\u0435\u0442\u0435|\u043D\u0430\u043F\u0440\u0430\u0432\u0435\u0442\u0435)\b",
+    re.IGNORECASE,
+)
+_MK_TEMPORAL_ADVERBS = re.compile(
+    r"\b(?:\u0443\u0442\u0440\u0435|\u0434\u0435\u043D\u0435\u0441\u043A\u0430|\u0434\u0435\u043D\u0435\u0441|\u043F\u0440\u0435\u043A\u0443\u0432\u0447\u0435\u0440\u0430|\u0437\u0430\u0432\u0442\u0440\u0430)\b",
+    re.IGNORECASE,
+)
+_MK_DAY_NAMES = re.compile(
+    r"\b(?:(?:\u0432\u043E|\u043D\u0430)\s+)?(?:\u043F\u043E\u043D\u0435\u0434\u0435\u043B\u043D\u0438\u043A|\u0432\u0442\u043E\u0440\u043D\u0438\u043A|\u0441\u0440\u0435\u0434\u0430|\u0447\u0435\u0442\u0432\u0440\u0442\u043E\u043A|\u043F\u0435\u0442\u043E\u043A|\u0441\u0430\u0431\u043E\u0442\u0430|\u043D\u0435\u0434\u0435\u043B\u0430)\b",
+    re.IGNORECASE,
+)
+_MK_MONTH_NAMES = re.compile(
+    r"\b(?:\u0458\u0430\u043D\u0443\u0430\u0440\u0438|\u0444\u0435\u0432\u0440\u0443\u0430\u0440\u0438|\u043C\u0430\u0440\u0442|\u0430\u043F\u0440\u0438\u043B|\u043C\u0430\u0458|\u0458\u0443\u043D\u0438|\u0458\u0443\u043B\u0438|\u0430\u0432\u0433\u0443\u0441\u0442|\u0441\u0435\u043F\u0442\u0435\u043C\u0432\u0440\u0438|\u043E\u043A\u0442\u043E\u043C\u0432\u0440\u0438|\u043D\u043E\u0435\u043C\u0432\u0440\u0438|\u0434\u0435\u043A\u0435\u043C\u0432\u0440\u0438)\b",
+    re.IGNORECASE,
+)
+_MK_NEXT_MODIFIERS = re.compile(
+    r"\b(?:\u0441\u043B\u0435\u0434\u043D\u0438\u043E\u0442|\u0441\u043B\u0435\u0434\u043D\u0430\u0442\u0430|\u0441\u043B\u0435\u0434\u043D\u0430|\u0441\u043B\u0435\u0434\u0435\u043D|\u043D\u0430\u0440\u0435\u0434\u043D\u0438\u043E\u0442|\u043D\u0430\u0440\u0435\u0434\u043D\u0430\u0442\u0430)\b",
+    re.IGNORECASE,
+)
+# "\u0432\u043E 10 \u0447\u0430\u0441\u043E\u0442", "\u0432\u043E 14:30", "\u0432\u043E 9 \u0447\u0430\u0441\u043E\u0442"
+_MK_TIME_CONTEXT = re.compile(
+    r"\b\u0432\u043E\s+\d{1,2}(?::\d{2})?\s*(?:\u0447\u0430\u0441\u043E\u0442|\u0447\u0430\u0441\u043E\u0432\u0438)?\b",
+    re.IGNORECASE,
+)
+# "\u043F\u043E\u043F\u043B\u0430\u0434\u043D\u0435", "\u0432\u043E \u043F\u043E\u043F\u043B\u0430\u0434\u043D\u0435", "\u043D\u0430\u0443\u0442\u0440\u043E", "\u043D\u0430\u0432\u0435\u0447\u0435\u0440", "\u043D\u043E\u045C\u0435", etc.
+_MK_TIME_OF_DAY = re.compile(
+    r"\b(?:\u0432\u043E\s+)?(?:\u043F\u043E\u043F\u043B\u0430\u0434\u043D\u0435|\u043F\u043E\u043F\u043B\u0430\u0434\u043D\u0435\u0442\u043E|\u043D\u0430\u0443\u0442\u0440\u043E|\u0443\u0442\u0440\u043E\u0442\u043E|\u0443\u0442\u0440\u0438\u043D\u0442\u0430|\u043D\u0430\u0432\u0435\u0447\u0435\u0440|\u0432\u0435\u0447\u0435\u0440\u0442\u0430|\u043D\u043E\u045C\u0435|\u043D\u043E\u045C\u0442\u0430)\b",
+    re.IGNORECASE,
+)
+# "\u043D\u0430 15-\u0442\u0438", "\u043D\u0430 20-\u0442\u0430", "\u043D\u0430 20"
+_MK_DATE_ORDINAL = re.compile(
+    r"\b\u043D\u0430\s+\d{1,2}(?:-(?:\u0442\u0438|\u0442\u0430|\u0442\u043E|\u0440\u0438|\u043C\u0438|\u0432\u0438|\u0433\u0438|\u043D\u0438))?\b",
+    re.IGNORECASE,
+)
 
 
 def _contains_prompt_injection(text: str) -> bool:
     if not text:
         return False
     return any(pattern.search(text) for pattern in _PROMPT_INJECTION_PATTERNS)
+
+
+def _contains_cyrillic(text: str) -> bool:
+    """Check if text contains Cyrillic characters (including Macedonian, Russian, Serbian, etc.)."""
+    if not text:
+        return False
+    return bool(_CYRILLIC_PATTERN.search(text))
+
+
+def _extract_cyrillic_event_name_fallback(message: str) -> str | None:
+    """Extract the Macedonian event name from the raw message by stripping noise tokens.
+
+    Removes booking command verbs, date expressions, time expressions, and temporal
+    words — then returns the remaining Cyrillic tokens as the event name.
+    Date and time extraction is handled separately in _postprocess_calendar_extraction
+    so stripping them here does not affect those fields.
+    """
+    cleaned = _MK_TIME_CONTEXT.sub(" ", message)
+    cleaned = _MK_TIME_OF_DAY.sub(" ", cleaned)
+    cleaned = _MK_DATE_ORDINAL.sub(" ", cleaned)
+    cleaned = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", " ", cleaned)
+    cleaned = re.sub(r"\b\d{1,2}:\d{2}\b", " ", cleaned)
+    cleaned = re.sub(r"\b\d+\b", " ", cleaned)
+    cleaned = _MK_BOOKING_VERBS.sub(" ", cleaned)
+    cleaned = _MK_TEMPORAL_ADVERBS.sub(" ", cleaned)
+    cleaned = _MK_DAY_NAMES.sub(" ", cleaned)
+    cleaned = _MK_MONTH_NAMES.sub(" ", cleaned)
+    cleaned = _MK_NEXT_MODIFIERS.sub(" ", cleaned)
+    cyrillic_tokens = re.findall(r"[Ѐ-ӿ]+", cleaned)
+    if not cyrillic_tokens:
+        return None
+    return " ".join(cyrillic_tokens).strip() or None
 
 
 def _parse_number_like(value: Any) -> float | None:
@@ -302,6 +372,13 @@ def _resolve_relative_event_date(message: str) -> str | None:
     if "today" in lowered:
         return today.isoformat()
 
+    # Macedonian relative dates resolved by Python so Ollama doesn't have to convert them.
+    if re.search(r"\bутре\b", lowered):
+        return (today + timedelta(days=1)).isoformat()
+
+    if re.search(r"\b(?:денеска|денес)\b", lowered):
+        return today.isoformat()
+
     weekday_aliases: dict[str, int] = {
         "monday": 0,
         "mon": 0,
@@ -320,6 +397,14 @@ def _resolve_relative_event_date(message: str) -> str | None:
         "sat": 5,
         "sunday": 6,
         "sun": 6,
+        # Macedonian weekday names
+        "понеделник": 0,
+        "вторник": 1,
+        "среда": 2,
+        "четврток": 3,
+        "петок": 4,
+        "сабота": 5,
+        "недела": 6,
     }
 
     for alias, target_weekday in weekday_aliases.items():
@@ -331,8 +416,10 @@ def _resolve_relative_event_date(message: str) -> str | None:
             delta = delta + 7 if delta > 0 else 7
         elif re.search(rf"\bthis\s+{alias}\b", lowered):
             delta = delta
+        elif re.search(rf"\b(?:следниот|следната|следна|следен)\s+{alias}\b", lowered):
+            delta = delta + 7 if delta > 0 else 7
         else:
-            # Plain "monday/friday" means the next upcoming occurrence.
+            # Plain day name means the next upcoming occurrence.
             if delta == 0:
                 delta = 7
 
@@ -351,6 +438,14 @@ def _postprocess_calendar_extraction(message: str, extracted: dict[str, Any]) ->
     event_date = str(normalized.get("event_date") or "").strip()
     event_time = _normalize_event_time(normalized.get("event_time"))
     duration_raw = normalized.get("duration_minutes")
+
+    # For Macedonian (Cyrillic) messages, always derive event_name in Python by stripping
+    # booking verbs, date tokens, and time tokens from the raw message. Ollama reliably
+    # extracts date and time but cannot be trusted to isolate just the event title.
+    if _contains_cyrillic(message):
+        recovered = _extract_cyrillic_event_name_fallback(message)
+        if recovered:
+            event_name = recovered
 
     if not event_name:
         raise ValueError("Missing event_name in calendar extraction output.")
@@ -479,10 +574,19 @@ def run_calendar_event_extraction(message: str) -> dict[str, Any]:
     }
 
     current_date = datetime.now().date().isoformat()
+    has_cyrillic = _contains_cyrillic(message)
+    language_hint = (
+        "CRITICAL: The user is writing in Macedonian (Cyrillic script). "
+        "For event_name ONLY: copy the exact Cyrillic characters from the user message word for word — do NOT translate or change any letters. "
+        "For event_date and event_time: still convert them to the required formats (YYYY-MM-DD and HH:MM) as normal.\n"
+        if has_cyrillic
+        else ""
+    )
 
     prompt_template = (
         "You are an extraction assistant for calendar event scheduling. "
         "Extract only user-provided event fields from the user message and return JSON only.\n\n"
+        "{language_hint}"
         "Reference date: {current_date}. Use this date when interpreting relative expressions like today/tomorrow.\n\n"
         "Expected keys:\n"
         "event_name\n"
@@ -494,13 +598,14 @@ def run_calendar_event_extraction(message: str) -> dict[str, Any]:
         "- Do not output keys outside the expected list.\n"
         "- If a key is missing or uncertain, omit it.\n"
         "- Do not include markdown fences or extra text.\n"
-        "- Keep event_name concise and literal from user intent.\n"
-        "- Normalize date and time formats exactly as requested above.\n\n"
+        "- event_name: extract only the meeting or event title/description from the message — exclude the booking command verb, the date, and the time. Preserve the original language and script without translating.\n"
+        "- event_date: always output in YYYY-MM-DD format, converting any date expression the user wrote.\n"
+        "- event_time: always output in HH:MM 24-hour format, converting any time expression the user wrote.\n\n"
         "User message:\n{message}"
     )
 
     chain = create_simple_chain(prompt_template)
-    result = chain.invoke({"message": message, "current_date": current_date})
+    result = chain.invoke({"message": message, "current_date": current_date, "language_hint": language_hint})
 
     if isinstance(result, str):
         extracted = _normalize_extraction_output(result, allowed_keys=allowed_keys)

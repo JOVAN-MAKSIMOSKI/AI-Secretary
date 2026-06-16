@@ -5,7 +5,9 @@ import { getChainRegistry } from './chainRegistry.js';
 import { resolveChainWithLlm } from './llmResolver.js';
 
 test('resolver selects invoice extraction from invoice prompt', async () => {
-  const previous = process.env.ANTHROPIC_API_KEY;
+  const previousAnthropic = process.env.ANTHROPIC_API_KEY;
+  const previousProvider = process.env.ROUTER_LLM_PROVIDER;
+  process.env.ROUTER_LLM_PROVIDER = 'keyword';
   delete process.env.ANTHROPIC_API_KEY;
 
   const decision = await resolveChainWithLlm(
@@ -13,15 +15,18 @@ test('resolver selects invoice extraction from invoice prompt', async () => {
     getChainRegistry(),
   );
 
-  if (previous) {
-    process.env.ANTHROPIC_API_KEY = previous;
+  if (previousAnthropic) {
+    process.env.ANTHROPIC_API_KEY = previousAnthropic;
   }
+  process.env.ROUTER_LLM_PROVIDER = previousProvider;
 
   assert.equal(decision.chainId, 'invoice_extraction');
 });
 
 test('resolver selects offer extraction from offer prompt', async () => {
-  const previous = process.env.ANTHROPIC_API_KEY;
+  const previousAnthropic = process.env.ANTHROPIC_API_KEY;
+  const previousProvider = process.env.ROUTER_LLM_PROVIDER;
+  process.env.ROUTER_LLM_PROVIDER = 'keyword';
   delete process.env.ANTHROPIC_API_KEY;
 
   const decision = await resolveChainWithLlm(
@@ -29,15 +34,18 @@ test('resolver selects offer extraction from offer prompt', async () => {
     getChainRegistry(),
   );
 
-  if (previous) {
-    process.env.ANTHROPIC_API_KEY = previous;
+  if (previousAnthropic) {
+    process.env.ANTHROPIC_API_KEY = previousAnthropic;
   }
+  process.env.ROUTER_LLM_PROVIDER = previousProvider;
 
   assert.equal(decision.chainId, 'offer_extraction');
 });
 
 test('resolver selects calendar event extraction from scheduling prompt', async () => {
-  const previous = process.env.ANTHROPIC_API_KEY;
+  const previousAnthropic = process.env.ANTHROPIC_API_KEY;
+  const previousProvider = process.env.ROUTER_LLM_PROVIDER;
+  process.env.ROUTER_LLM_PROVIDER = 'keyword';
   delete process.env.ANTHROPIC_API_KEY;
 
   const decision = await resolveChainWithLlm(
@@ -45,9 +53,10 @@ test('resolver selects calendar event extraction from scheduling prompt', async 
     getChainRegistry(),
   );
 
-  if (previous) {
-    process.env.ANTHROPIC_API_KEY = previous;
+  if (previousAnthropic) {
+    process.env.ANTHROPIC_API_KEY = previousAnthropic;
   }
+  process.env.ROUTER_LLM_PROVIDER = previousProvider;
 
   assert.equal(decision.chainId, 'calendar_event_extraction');
 });

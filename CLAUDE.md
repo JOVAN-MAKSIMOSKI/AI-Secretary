@@ -50,6 +50,7 @@ Project rules are split across scoped files so context only loads when relevant.
 | `.claude/skills/mcp-architecture/` | On demand | MCP client, transport, sampling, elicitation |
 | `.claude/skills/skill-management/` | On demand | Skill creation, testing, post-session review, auditing |
 | `.github/architecture.md` | Reference | Full repo tree, service boundaries, LLM resolver contract |
+| `.claude/plans/` | Reference | Implementation plans for in-progress or upcoming features |
 
 When in doubt about which rule applies, check the relevant scoped file. Do not guess.
 
@@ -79,6 +80,7 @@ These apply to every task in every file, no exceptions.
 ### Collaboration
 - **Question mark = answer only.** If a prompt ends with `?`, respond — do not write code or take action.
 - **Plan before large changes.** Provide a brief implementation plan before any non-trivial code update.
+- **Save plans to `.claude/plans/`.** Whenever a plan is created or approved, write it to `.claude/plans/<feature-slug>.md` so it persists across sessions.
 - **No changes with missing context.** If the relevant file, schema, or prior decision is not in context, ask before proceeding.
 - **Suggest alternatives explicitly.** If a better solution exists outside the current scope, say so, explain why, and wait for approval. Do not implement it unilaterally.
 - **Comment your changes.** When modifying code, include comments that describe what changed and why.

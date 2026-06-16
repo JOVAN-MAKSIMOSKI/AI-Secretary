@@ -8,9 +8,11 @@ import {
 	disconnectGmailConnection,
 	getGmailConnection,
 	getTenantForUser,
+	GmailReconnectRequiredError,
 } from './lib/gmailOAuth.js';
 import { runDirectResolverChain } from './agent/directResolverChain.js';
 import { createCalendarEvent, deleteCalendarEvent, listCalendarEvents } from './mcp/calendar.js';
+import { getGmailInboxStats } from './mcp/gmail.js';
 import { supabase } from './lib/supabase.js';
 
 type AuthenticatedRequest = Request & { userAuthId?: string };
@@ -43,6 +45,7 @@ function parseBearerToken(req: Request): string | null {
 }
 
 async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+	
 	const token = parseBearerToken(req);
 	if (!token) {
 		res.status(401).json({ error: 'Missing bearer token.' });
@@ -231,6 +234,32 @@ app.post('/auth/google/gmail/disconnect', requireAuth, async (req: Authenticated
 		res.status(400).json({
 			error: error instanceof Error ? error.message : 'Failed to disconnect Gmail.',
 		});
+	}
+});
+
+app.get('/gmail/inbox/stats', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) {
+		res.status(401).json({ error: 'Missing authenticated user.' });
+		return;
+	}
+
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const stats = await getGmailInboxStats(tenantId, userAuthId);
+		res.json({ ...stats, connected: true });
+	} catch (error) {
+		// Return 200 for any expected "not available" state so the dashboard never
+		// logs a console error. A missing Gmail connection is not exceptional.
+		if (
+			error instanceof GmailReconnectRequiredError ||
+			(error instanceof Error && error.message.includes('No tenant/business'))
+		) {
+			res.json({ unreadCount: 0, connected: false });
+			return;
+		}
+		const message = error instanceof Error ? error.message : 'Failed to fetch inbox stats.';
+		res.status(500).json({ error: message });
 	}
 });
 

@@ -9,9 +9,51 @@ export interface ResolverDecision {
   missingInfo: string[];
 }
 
-const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+type RouterProvider = 'auto' | 'anthropic' | 'github' | 'keyword';
+
+const DEFAULT_ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+const DEFAULT_GITHUB_MODEL = process.env.RAG_LLM_MODEL || 'gpt-4o';
 
 let client: Anthropic | null = null;
+
+function getRouterProvider(): RouterProvider {
+  const raw = (process.env.ROUTER_LLM_PROVIDER || process.env.RAG_LLM_PROVIDER || 'auto').trim().toLowerCase();
+  if (raw === 'anthropic' || raw === 'github' || raw === 'keyword') {
+    return raw;
+  }
+  return 'auto';
+}
+
+function allowKeywordFallback(): boolean {
+  const raw = (process.env.ROUTER_ALLOW_KEYWORD_FALLBACK || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function getGithubModelsToken(): string {
+  return (
+    process.env.ROUTER_GITHUB_MODELS_TOKEN ||
+    process.env.RAG_GITHUB_MODELS_TOKEN ||
+    process.env.GITHUB_MODELS_TOKEN ||
+    ''
+  ).trim();
+}
+
+function getGithubModelsApiBase(): string {
+  return (process.env.ROUTER_GITHUB_MODELS_API_BASE || 'https://models.inference.ai.azure.com').trim();
+}
+
+function getRouterModel(provider: Exclude<RouterProvider, 'auto'>): string {
+  const override = (process.env.ROUTER_LLM_MODEL || '').trim();
+  if (override) {
+    return override;
+  }
+
+  if (provider === 'github') {
+    return DEFAULT_GITHUB_MODEL;
+  }
+
+  return DEFAULT_ANTHROPIC_MODEL;
+}
 
 function getAnthropicClient(): Anthropic | null {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -86,17 +128,13 @@ function keywordFallback(message: string, chains: ChainDefinition[]): ResolverDe
   };
 }
 
-export async function resolveChainWithLlm(
+async function resolveWithAnthropic(
   userMessage: string,
   chains: ChainDefinition[],
-): Promise<ResolverDecision> {
-  if (chains.length === 0) {
-    throw new Error('Chain registry is empty. Register at least one chain.');
-  }
-
+): Promise<ResolverDecision | null> {
   const anthropic = getAnthropicClient();
   if (!anthropic) {
-    return keywordFallback(userMessage, chains);
+    return null;
   }
 
   const chainCatalog = chains
@@ -121,7 +159,7 @@ export async function resolveChainWithLlm(
   ].join('\n');
 
   const response = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
+    model: getRouterModel('anthropic'),
     max_tokens: 300,
     temperature: 0,
     system: systemPrompt,
@@ -135,7 +173,7 @@ export async function resolveChainWithLlm(
 
   const parsed = extractJsonObject(text);
   if (!parsed || !isValidChainId(parsed.chainId, chains)) {
-    return keywordFallback(userMessage, chains);
+    return null;
   }
 
   const missingInfo = Array.isArray(parsed.missingInfo)
@@ -145,7 +183,130 @@ export async function resolveChainWithLlm(
   return {
     chainId: parsed.chainId,
     confidence: normalizeConfidence(parsed.confidence),
-    reason: typeof parsed.reason === 'string' ? parsed.reason : 'Resolved via LLM selection.',
+    reason: typeof parsed.reason === 'string' ? parsed.reason : 'Resolved via Anthropic router.',
     missingInfo,
   };
+}
+
+async function resolveWithGithubModels(
+  userMessage: string,
+  chains: ChainDefinition[],
+): Promise<ResolverDecision | null> {
+  const token = getGithubModelsToken();
+  if (!token) {
+    return null;
+  }
+
+  const chainCatalog = chains
+    .map((chain) => {
+      return `${chain.id}: ${chain.description}`;
+    })
+    .join('\n');
+
+  const systemPrompt = [
+    'You are a routing resolver for a multi-chain AI secretary.',
+    'Select exactly one chain id from the provided catalog.',
+    'Return only JSON with keys: chainId, confidence, reason, missingInfo.',
+    'confidence must be in [0,1]. missingInfo must be an array of short strings.',
+  ].join(' ');
+
+  const userPrompt = [
+    'Available chains:',
+    chainCatalog,
+    '',
+    'User message:',
+    userMessage,
+  ].join('\n');
+
+  const response = await fetch(`${getGithubModelsApiBase()}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      model: getRouterModel('github'),
+      temperature: 0,
+      max_tokens: 300,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+    }),
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message?: string };
+  };
+
+  if (!response.ok) {
+    const message = payload.error?.message || `GitHub Models router request failed (${response.status}).`;
+    throw new Error(message);
+  }
+
+  const text = payload.choices?.[0]?.message?.content || '';
+  const parsed = extractJsonObject(text);
+  if (!parsed || !isValidChainId(parsed.chainId, chains)) {
+    return null;
+  }
+
+  const missingInfo = Array.isArray(parsed.missingInfo)
+    ? parsed.missingInfo.filter((item): item is string => typeof item === 'string')
+    : [];
+
+  return {
+    chainId: parsed.chainId,
+    confidence: normalizeConfidence(parsed.confidence),
+    reason: typeof parsed.reason === 'string' ? parsed.reason : 'Resolved via GitHub Models router.',
+    missingInfo,
+  };
+}
+
+export async function resolveChainWithLlm(
+  userMessage: string,
+  chains: ChainDefinition[],
+): Promise<ResolverDecision> {
+  if (chains.length === 0) {
+    throw new Error('Chain registry is empty. Register at least one chain.');
+  }
+  const provider = getRouterProvider();
+  const fallbackAllowed = allowKeywordFallback();
+
+  try {
+    let decision: ResolverDecision | null = null;
+
+    if (provider === 'keyword') {
+      return keywordFallback(userMessage, chains);
+    }
+
+    if (provider === 'anthropic') {
+      decision = await resolveWithAnthropic(userMessage, chains);
+    } else if (provider === 'github') {
+      decision = await resolveWithGithubModels(userMessage, chains);
+    } else {
+      // auto mode prefers GitHub token if configured, then Anthropic.
+      decision = (await resolveWithGithubModels(userMessage, chains)) || (await resolveWithAnthropic(userMessage, chains));
+    }
+
+    if (decision) {
+      return decision;
+    }
+
+    if (fallbackAllowed) {
+      return keywordFallback(userMessage, chains);
+    }
+
+    throw new Error(
+      'No router LLM is configured or returned invalid output. Configure ROUTER_LLM_PROVIDER and credentials, or set ROUTER_ALLOW_KEYWORD_FALLBACK=true.',
+    );
+  } catch (error) {
+    if (fallbackAllowed) {
+      return keywordFallback(userMessage, chains);
+    }
+
+    const message = error instanceof Error ? error.message : 'Unknown router error.';
+    throw new Error(`LLM resolver failed: ${message}`);
+  }
 }

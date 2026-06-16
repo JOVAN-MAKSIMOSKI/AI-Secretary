@@ -267,6 +267,39 @@ ${business.name}
 }
 
 /**
+ * Returns the exact unread message count for the user's inbox over the last 30 days.
+ * Paginates messages.list (IDs only, no payloads) to get a precise count rather
+ * than relying on resultSizeEstimate, which is a stale server-side guess.
+ */
+export async function getGmailInboxStats(
+  tenantId: string,
+  userAuthId: string,
+): Promise<{ unreadCount: number }> {
+  const { auth } = await buildGmailAuthClient(tenantId, userAuthId);
+  const gmail = google.gmail({ version: 'v1', auth });
+
+  const since = new Date();
+  since.setDate(since.getDate() - 30);
+  const afterDate = `${since.getFullYear()}/${String(since.getMonth() + 1).padStart(2, '0')}/${String(since.getDate()).padStart(2, '0')}`;
+
+  let count = 0;
+  let pageToken: string | undefined;
+
+  do {
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: `is:unread in:inbox after:${afterDate}`,
+      maxResults: 500,
+      pageToken,
+    });
+    count += (response.data.messages ?? []).length;
+    pageToken = response.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return { unreadCount: count };
+}
+
+/**
  * List recent sent invoices/offers (for audit trail)
  */
 export async function listSentDocuments(
