@@ -13,10 +13,17 @@ export default function LawQuestions() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  const handleStop = () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setIsLoading(false);
+  };
 
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -37,8 +44,11 @@ export default function LawQuestions() {
     setIsLoading(true);
     setError(null);
 
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
-      const answer = await queryLawDocuments(content);
+      const answer = await queryLawDocuments(content, 5, abortController.signal);
       const assistantMessage: ChatMessage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: "assistant",
@@ -47,8 +57,11 @@ export default function LawQuestions() {
       };
       addMessage(assistantMessage);
     } catch (err) {
-      setError((err as Error).message ?? "Something went wrong. Please try again.");
+      if ((err as Error).name !== "AbortError") {
+        setError((err as Error).message ?? "Something went wrong. Please try again.");
+      }
     } finally {
+      abortControllerRef.current = null;
       setIsLoading(false);
     }
   };
@@ -152,13 +165,27 @@ export default function LawQuestions() {
             />
 
             <div className="flex items-center justify-end border-t border-[var(--brand-border)] pt-2">
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="inline-flex h-9 items-center justify-center rounded-full bg-[var(--brand-teal)] px-4 text-sm font-medium text-white transition hover:bg-[#2f8575] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isLoading ? "Thinking…" : "Send"}
-              </button>
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 text-sm font-medium text-[var(--brand-ink)] transition hover:border-red-400 hover:text-red-500"
+                  aria-label="Stop generation"
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                    <rect x="0" y="0" width="10" height="10" rx="2" />
+                  </svg>
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  className="inline-flex h-9 items-center justify-center rounded-full bg-[var(--brand-teal)] px-4 text-sm font-medium text-white transition hover:bg-[#2f8575] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Send
+                </button>
+              )}
             </div>
           </div>
         </form>

@@ -12,12 +12,13 @@ export interface ResolverDecision {
 type RouterProvider = 'auto' | 'anthropic' | 'github' | 'keyword';
 
 const DEFAULT_ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
-const DEFAULT_GITHUB_MODEL = process.env.RAG_LLM_MODEL || 'gpt-4o';
+const DEFAULT_GITHUB_MODEL = process.env.ROUTER_LLM_MODEL || 'gpt-4o';
 
 let client: Anthropic | null = null;
 
 function getRouterProvider(): RouterProvider {
-  const raw = (process.env.ROUTER_LLM_PROVIDER || process.env.RAG_LLM_PROVIDER || 'auto').trim().toLowerCase();
+  // Only read ROUTER_LLM_PROVIDER — RAG_LLM_PROVIDER belongs to the Python service and must not bleed into the router.
+  const raw = (process.env.ROUTER_LLM_PROVIDER || 'auto').trim().toLowerCase();
   if (raw === 'anthropic' || raw === 'github' || raw === 'keyword') {
     return raw;
   }

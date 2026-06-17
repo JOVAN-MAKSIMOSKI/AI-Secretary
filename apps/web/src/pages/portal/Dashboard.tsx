@@ -1,16 +1,18 @@
-import { FormEvent, KeyboardEvent, useEffect, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   createInvoiceDocument,
   extractDashboardMessage,
+  getCachedTasks,
   getGmailInboxStats,
   listCalendarEvents,
+  listTasks,
   type CalendarEventResponse,
   type DashboardResolveAndRunResponse,
   type ExtractedInvoiceFromMessage,
   type InvoiceDocumentRequest,
 } from "../../connection/supabase-client";
 import { useAppContextStore } from "../../store/app-context";
-import { useSessionStore } from "../../store/session";
 import { useDashboardChat, type ChatMessage } from "../../hooks/useAgent";
 
 function formatDateIso(dateValue: string): string {
@@ -291,20 +293,23 @@ function formatNonInvoiceChainResponse(response: DashboardResolveAndRunResponse)
 const TOMORROW_END_OFFSET_MS = 2 * 24 * 60 * 60 * 1000;
 
 export default function PortalDashboard() {
-  const tenantId = useSessionStore((state) => state.tenantId);
+  const navigate = useNavigate();
   const userEmail = useAppContextStore((state) => state.userEmail);
-  const tenantIdentifier = tenantId;
   const { messages, addMessage, clearMessages } = useDashboardChat();
   const [invoiceDraft, setInvoiceDraft] = useState<ExtractedInvoiceFromMessage | null>(null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [upcomingEvents, setUpcomingEvents] = useState<CalendarEventResponse[]>([]);
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const [gmailNeedsReconnect, setGmailNeedsReconnect] = useState(false);
+  const [pendingTaskCount, setPendingTaskCount] = useState<number>(() =>
+    getCachedTasks().filter((t) => t.status === "pending").length
+  );
+  const [tasksLoadFailed, setTasksLoadFailed] = useState(false);
 
-  // Fetch upcoming events (today + tomorrow) and unread email count on mount
   useEffect(() => {
     const timeMin = new Date().toISOString();
     const timeMax = new Date(Date.now() + TOMORROW_END_OFFSET_MS).toISOString();
@@ -321,6 +326,10 @@ export default function PortalDashboard() {
         setUnreadCount(stats.unreadCount);
       }
     });
+
+    listTasks({ status: "pending" })
+      .then((tasks) => setPendingTaskCount(tasks.length))
+      .catch(() => setTasksLoadFailed(true));
   }, []);
 
   useEffect(() => {
@@ -332,6 +341,13 @@ export default function PortalDashboard() {
       }
     };
   }, [messages]);
+
+  const handleStop = () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setIsLoading(false);
+    setInvoiceDraft(null);
+  };
 
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -352,8 +368,11 @@ export default function PortalDashboard() {
     setIsLoading(true);
     setError(null);
 
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
-      const resolveResponse = await extractDashboardMessage(content);
+      const resolveResponse = await extractDashboardMessage(content, abortController.signal);
       const extracted = (resolveResponse.result?.extracted ?? {}) as ExtractedInvoiceFromMessage;
 
       if (resolveResponse.resolvedChainId !== "invoice_extraction") {
@@ -397,8 +416,11 @@ export default function PortalDashboard() {
         addMessage(assistantMessage);
       }
     } catch (err) {
-      setError((err as Error).message ?? "Failed to run extraction chain.");
+      if ((err as Error).name !== "AbortError") {
+        setError((err as Error).message ?? "Failed to run extraction chain.");
+      }
     } finally {
+      abortControllerRef.current = null;
       setIsLoading(false);
     }
   };
@@ -417,155 +439,257 @@ export default function PortalDashboard() {
     setInvoiceDraft(null);
   };
 
+  const userInitial = (userEmail ?? "U")[0].toUpperCase();
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--brand-surface)]">
-      <section className="min-h-[180px] border-b border-[var(--brand-border)] px-5 py-4 md:min-h-[220px]">
-        <div className="mx-auto h-full max-w-6xl">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-base font-medium text-[var(--brand-ink)]">Metrics</h2>
-              <p className="mt-1 text-xs text-[var(--brand-text-muted)]">Reserved top section for dashboard KPI widgets.</p>
-            </div>
-            <p className="text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"} · {tenantIdentifier ?? "Loading..."}</p>
+    <div className="flex min-h-screen flex-col bg-[var(--brand-surface)] md:h-full md:min-h-0">
+      {/* Metric cards strip */}
+      <section className="border-b border-[var(--brand-border)] bg-[var(--brand-surface)] px-6 py-5">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Overview</p>
+            <p className="text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"}</p>
           </div>
-          <div className="grid h-[calc(100%-2.25rem)] grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+
             {/* Card 1 — Upcoming calendar events */}
-            <div className="flex flex-col gap-2 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--brand-text-muted)]">Upcoming Events</p>
-              {upcomingEvents.length === 0 ? (
-                <p className="text-xs text-[var(--brand-text-muted)]">No events in the next 2 days.</p>
-              ) : (
-                upcomingEvents.map((event) => (
-                  <div key={event.eventId} className="rounded-md border border-[var(--brand-border)] px-3 py-2">
-                    <p className="truncate text-xs font-medium text-[var(--brand-ink)]">{event.title}</p>
-                    <p className="mt-0.5 text-[10px] text-[var(--brand-text-muted)]">
-                      {new Date(event.startTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                    </p>
+            <div onClick={() => navigate("/portal/calendar")} className="flex cursor-pointer flex-col justify-between rounded-2xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-5 shadow-sm shadow-black/[0.03] transition hover:border-[var(--brand-teal)] hover:shadow-md hover:shadow-black/[0.06]">
+              <div>
+                {/* Icon */}
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--brand-teal-soft)]">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <rect x="3" y="4" width="18" height="18" rx="3" stroke="var(--brand-teal)" strokeWidth="1.8" />
+                    <path d="M3 9h18" stroke="var(--brand-teal)" strokeWidth="1.8" />
+                    <path d="M8 2v4M16 2v4" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinecap="round" />
+                    <circle cx="8" cy="14" r="1" fill="var(--brand-teal)" />
+                    <circle cx="12" cy="14" r="1" fill="var(--brand-teal)" />
+                    <circle cx="16" cy="14" r="1" fill="var(--brand-teal)" />
+                  </svg>
+                </div>
+                <p className="text-[11px] font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Upcoming Events</p>
+                {upcomingEvents.length === 0 ? (
+                  <p className="mt-2 text-sm font-medium text-[var(--brand-ink)]">No events in the next 2 days</p>
+                ) : (
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    {upcomingEvents.map((event) => (
+                      <div key={event.eventId}>
+                        <p className="truncate text-sm font-semibold text-[var(--brand-ink)]">{event.title}</p>
+                        <p className="text-xs text-[var(--brand-text-muted)]">
+                          {new Date(event.startTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                ))
-              )}
+                )}
+              </div>
+              {/* Footer */}
+              <div className="mt-5 flex items-center gap-2 border-t border-[var(--brand-border)] pt-3">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-teal)] text-[9px] font-bold text-white">
+                  {userInitial}
+                </div>
+                <p className="text-[10px] text-[var(--brand-text-muted)]">Calendar · live</p>
+              </div>
             </div>
 
             {/* Card 2 — Unread email count */}
-            <div className="flex flex-col justify-between rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--brand-text-muted)]">Unread Emails</p>
-              {gmailNeedsReconnect ? (
-                <p className="text-xs text-[var(--brand-text-muted)]">Gmail needs to be reconnected to show unread count.</p>
-              ) : (
-                <p className="text-3xl font-semibold text-[var(--brand-ink)]">
-                  {unreadCount === null ? "—" : unreadCount}
-                </p>
-              )}
+            <div className="flex flex-col justify-between rounded-2xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-5 shadow-sm shadow-black/[0.03] transition hover:shadow-md hover:shadow-black/[0.06]">
+              <div>
+                {/* Icon */}
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--brand-teal-soft)]">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <rect x="2" y="5" width="20" height="14" rx="3" stroke="var(--brand-teal)" strokeWidth="1.8" />
+                    <path d="M2 8l10 7 10-7" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <p className="text-[11px] font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Unread Emails</p>
+                {gmailNeedsReconnect ? (
+                  <p className="mt-2 text-sm font-medium text-[var(--brand-ink)]">Gmail needs reconnection</p>
+                ) : (
+                  <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--brand-ink)]">
+                    {unreadCount === null ? "—" : unreadCount}
+                  </p>
+                )}
+              </div>
+              {/* Footer */}
+              <div className="mt-5 flex items-center gap-2 border-t border-[var(--brand-border)] pt-3">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-teal)] text-[9px] font-bold text-white">
+                  {userInitial}
+                </div>
+                <p className="text-[10px] text-[var(--brand-text-muted)]">Gmail · live</p>
+              </div>
             </div>
 
-            {/* Card 3 — Reserved */}
-            <div className="grid place-items-center rounded-lg border border-dashed border-[var(--brand-border)] bg-[var(--brand-card)]/90 p-4 text-xs text-[var(--brand-text-muted)]">
-              Reserved
+            {/* Card 3 — Pending tasks */}
+            <div onClick={() => navigate("/portal/calendar")} className="flex cursor-pointer flex-col justify-between rounded-2xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-5 shadow-sm shadow-black/[0.03] transition hover:border-[var(--brand-teal)] hover:shadow-md hover:shadow-black/[0.06]">
+              <div>
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--brand-teal-soft)]">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M9 11l3 3L22 4" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <p className="text-[11px] font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Pending Tasks</p>
+                <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--brand-ink)]">
+                  {pendingTaskCount}
+                </p>
+              </div>
+              <div className="mt-5 flex items-center gap-2 border-t border-[var(--brand-border)] pt-3">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-teal)] text-[9px] font-bold text-white">
+                  {userInitial}
+                </div>
+                <p className="text-[10px] text-[var(--brand-text-muted)]">
+                  {tasksLoadFailed ? "Tasks · failed to load" : "Tasks · live"}
+                </p>
+              </div>
             </div>
+
           </div>
         </div>
       </section>
 
-      <section className="min-h-0 flex-1 border-t border-[var(--brand-border)] px-3 pb-3 pt-3 md:px-4 md:pb-4">
-        <div className="flex h-full min-h-0 w-full flex-col rounded-xl border border-[var(--brand-border)] bg-[var(--brand-card)]">
-          <div className="border-b border-[var(--brand-border)] px-5 py-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-medium text-[var(--brand-ink)]">Assistant Chat</h2>
-                <p className="mt-1 text-xs text-[var(--brand-text-muted)]">Routes your message to invoice, offer, or calendar extraction and responds with structured output.</p>
-              </div>
-              <button
-                type="button"
-                onClick={clearChat}
-                className="rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] px-3 py-1.5 text-xs font-medium text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)]"
-              >
-                Clear chat
-              </button>
+      {/* Chat area */}
+      <section className="flex min-h-[600px] flex-1 flex-col overflow-hidden md:min-h-0">
+        <div className="flex h-full min-h-0 flex-col">
+          {/* Chat header */}
+          <div className="flex items-center justify-between border-b border-[var(--brand-border)] bg-[var(--brand-card)] px-5 py-3">
+            <div className="flex items-center gap-2">
+              {/* Sparkle icon matching Bard's star */}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="shrink-0">
+                <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="var(--brand-teal)" />
+              </svg>
+              <span className="text-sm font-medium text-[var(--brand-ink)]">Assistant</span>
             </div>
+            <button
+              type="button"
+              onClick={clearChat}
+              className="rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] px-3 py-1 text-xs text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)]"
+            >
+              New chat
+            </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            {messages.length === 0 && !isLoading ? (
-              <div className="grid h-full place-items-center">
-                <div className="max-w-md text-center">
-                  <h3 className="text-xl font-medium tracking-[-0.01em] text-[var(--brand-ink)]">How can I help you today?</h3>
-                  <p className="mt-2 text-sm text-[var(--brand-text-muted)]">You can ask for invoice, offer, or calendar extraction in plain text.</p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-6 py-2">
-                {messages.map((message) => (
-                  <div key={message.id} className="w-full">
-                    <div
-                      className={
-                        message.role === "user"
-                          ? "ml-auto w-fit max-w-[80%] rounded-2xl bg-[var(--brand-teal-soft)] px-4 py-3 text-sm leading-6 text-[var(--brand-ink)]"
-                          : "mr-auto max-w-[90%] rounded-xl bg-[var(--brand-card)] px-3 py-2 text-sm leading-7 text-[var(--brand-ink)]"
-                      }
-                    >
-                      <p className="whitespace-pre-wrap">{message.content}</p>
-                      {message.downloadUrl ? (
-                        <a
-                          href={message.downloadUrl}
-                          download={message.downloadLabel ?? "invoice.xlsx"}
-                          className="mt-2 inline-block rounded-md border border-[var(--brand-teal)] px-3 py-1 text-xs font-medium text-[var(--brand-teal)] hover:bg-[var(--brand-teal-soft)]"
-                        >
-                          Download {message.downloadLabel ?? "invoice.xlsx"}
-                        </a>
-                      ) : null}
-                    </div>
-                    <p className="mt-2 text-[10px] text-[var(--brand-text-muted)]">
-                      {message.role === "user" ? "You" : "Assistant"} · {new Date(message.createdAt).toLocaleTimeString()}
-                    </p>
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto bg-[var(--brand-chat-bg)] px-4 py-8">
+            <div className="mx-auto max-w-4xl">
+              {messages.length === 0 && !isLoading ? (
+                <div className="flex h-full min-h-[200px] items-center justify-center">
+                  <div className="text-center">
+                    <svg width="52" height="52" viewBox="0 0 24 24" fill="none" className="mx-auto mb-5">
+                      <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="var(--brand-teal)" opacity="0.7" />
+                    </svg>
+                    <h3 className="text-lg font-medium text-[var(--brand-ink)]">How can I help you today?</h3>
+                    <p className="mt-1.5 text-sm text-[var(--brand-text-muted)]">Ask me to create an invoice, offer, or book a meeting.</p>
                   </div>
-                ))}
-
-                {isLoading && (
-                  <div className="w-full">
-                    <div className="mr-auto max-w-[90%] rounded-xl bg-[var(--brand-card)] px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)] [animation-delay:-0.3s]" />
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)] [animation-delay:-0.15s]" />
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)]" />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {messages.map((message) => (
+                    <div key={message.id} className="flex items-start gap-3">
+                      {/* Avatar */}
+                      {message.role === "user" ? (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--brand-avatar-user)] text-xs font-semibold text-white">
+                          {userInitial}
+                        </div>
+                      ) : (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--brand-card)] border border-[var(--brand-border)]">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="var(--brand-teal)" />
+                          </svg>
+                        </div>
+                      )}
+                      {/* Bubble */}
+                      <div className="flex-1">
+                        <div className="rounded-2xl bg-[var(--brand-card)] px-4 py-3 text-sm leading-7 text-[var(--brand-ink)] shadow-sm shadow-black/[0.04]">
+                          <p className="whitespace-pre-wrap">{message.content}</p>
+                          {message.downloadUrl ? (
+                            <a
+                              href={message.downloadUrl}
+                              download={message.downloadLabel ?? "invoice.xlsx"}
+                              className="mt-2 inline-block rounded-lg border border-[var(--brand-teal)] px-3 py-1 text-xs font-medium text-[var(--brand-teal)] hover:bg-[var(--brand-teal-soft)]"
+                            >
+                              Download {message.downloadLabel ?? "invoice.xlsx"}
+                            </a>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 pl-1 text-[10px] text-[var(--brand-text-muted)]">
+                          {new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </p>
                       </div>
                     </div>
-                  </div>
-                )}
+                  ))}
 
-                {error && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {error}
-                  </div>
-                )}
-              </div>
-            )}
+                  {isLoading && (
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)]">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                          <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="var(--brand-teal)" />
+                        </svg>
+                      </div>
+                      <div className="rounded-2xl bg-[var(--brand-card)] px-4 py-3 shadow-sm shadow-black/[0.04]">
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)] [animation-delay:-0.3s]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)] [animation-delay:-0.15s]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)]" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {error}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          <form onSubmit={handleSend} className="border-t border-[var(--brand-border)] p-3">
-            <div className="rounded-[1.25rem] border border-[var(--brand-border)] bg-[var(--brand-card)] p-2 shadow-sm shadow-slate-100/70">
-              <textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={handleInputKeyDown}
-                rows={3}
-                maxLength={4000}
-                disabled={isLoading}
-                placeholder="Message dashboard assistant"
-                className="w-full resize-none bg-transparent px-3 py-2 text-sm text-[var(--brand-ink)] outline-none disabled:opacity-50"
-              />
-
-              <div className="flex items-center justify-end border-t border-[var(--brand-border)] pt-2">
-              
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="inline-flex h-9 items-center justify-center rounded-full bg-[var(--brand-teal)] px-4 text-sm font-medium text-white transition hover:bg-[#2f8575] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isLoading ? "Extracting..." : "Send"}
-                </button>
-              </div>
+          {/* Input bar */}
+          <div className="border-t border-[var(--brand-border)] bg-[var(--brand-chat-bg)] px-4 py-4">
+            <div className="mx-auto max-w-3xl">
+              <form onSubmit={handleSend}>
+                <div className="flex items-end gap-3 rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] px-5 py-3 shadow-sm shadow-black/[0.04] focus-within:border-[var(--brand-teal)] focus-within:ring-1 focus-within:ring-[var(--brand-teal)] transition">
+                  <textarea
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    onKeyDown={handleInputKeyDown}
+                    rows={1}
+                    maxLength={4000}
+                    disabled={isLoading}
+                    placeholder="Enter a prompt here"
+                    className="flex-1 resize-none bg-transparent text-sm text-[var(--brand-ink)] placeholder:text-[var(--brand-text-muted)] outline-none disabled:opacity-50 leading-6"
+                    style={{ maxHeight: "120px", overflowY: "auto" }}
+                  />
+                  {isLoading ? (
+                    <button
+                      type="button"
+                      onClick={handleStop}
+                      className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-ink)] transition hover:border-red-400 hover:text-red-500"
+                      aria-label="Stop generation"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                        <rect x="1" y="1" width="10" height="10" rx="2" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={!input.trim()}
+                      className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--brand-teal)] text-white transition hover:bg-[#2f8575] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <p className="mt-2 text-center text-[10px] text-[var(--brand-text-muted)]">
+                  Assistant may display inaccurate information. Always verify important outputs.
+                </p>
+              </form>
             </div>
-          </form>
+          </div>
         </div>
       </section>
     </div>

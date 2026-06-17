@@ -5,18 +5,21 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-	--brand-ink: #0f1923;
+	--brand-ink: #1a1f2e;
 	--brand-slate: #1e2530;
 	--brand-teal: #3d9e8c;
 	--brand-teal-soft: #eaf6f3;
-	--brand-surface: #f7f8fa;
+	--brand-surface: #f0f4fb;
 	--brand-card: #ffffff;
-	--brand-border: #e8ecf0;
+	--brand-chat-bg: #eff1fa;
+	--brand-user-bubble: #f3f4f8;
+	--brand-border: #e2e6f0;
 	--brand-text-muted: #6b7a8d;
 	--brand-warning-bg: #fef3dc;
 	--brand-warning-text: #8a5a0a;
 	--brand-danger-bg: #feecec;
 	--brand-danger-text: #8a1a1a;
+	--brand-avatar-user: #7c5cbf;
 }
 
 html,
@@ -27,7 +30,7 @@ body,
 
 body {
 	font-family: "Inter", sans-serif;
-	background: radial-gradient(circle at top left, #ffffff 0%, var(--brand-surface) 45%, #eef2f4 100%);
+	background: var(--brand-surface);
 	color: var(--brand-ink);
 }
 

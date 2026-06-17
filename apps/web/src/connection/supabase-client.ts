@@ -480,18 +480,15 @@ export async function listTasks(options?: {
   const now = Date.now();
   if (
     !options?.forceRefresh &&
-    !options?.status &&
     tasksCache !== null &&
     now - tasksCache.fetchedAt < TASKS_CACHE_TTL_MS
   ) {
-    return tasksCache.data;
+    const cached = tasksCache.data;
+    return options?.status ? cached.filter((t) => t.status === options.status) : cached;
   }
 
   const headers = await getAuthHeaders();
   const target = new URL(`${agentApiBaseUrl}/tasks`, window.location.origin);
-  if (options?.status) {
-    target.searchParams.set("status", options.status);
-  }
 
   const response = await fetchWithTimeout(target.toString(), {
     method: "GET",
@@ -505,15 +502,13 @@ export async function listTasks(options?: {
   const data = (await response.json()) as { tasks?: TaskResponse[] };
   const tasks = data.tasks ?? [];
 
-  if (!options?.status) {
-    tasksCache = {
-      data: tasks,
-      fetchedAt: Date.now(),
-    };
-    setCachedTasks(tasks);
-  }
+  tasksCache = {
+    data: tasks,
+    fetchedAt: Date.now(),
+  };
+  setCachedTasks(tasks);
 
-  return tasks;
+  return options?.status ? tasks.filter((t) => t.status === options.status) : tasks;
 }
 
 export async function createTask(payload: {
@@ -942,11 +937,18 @@ const calendarBookingResultSchema = z
   })
   .strict();
 
-export async function extractDashboardMessage(message: string): Promise<DashboardResolveAndRunResponse> {
+export async function extractDashboardMessage(message: string, externalSignal?: AbortSignal): Promise<DashboardResolveAndRunResponse> {
   const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), EXTRACTION_TIMEOUT_MS);
+
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", onExternalAbort);
+  }
 
   let response: Response;
   try {
@@ -958,11 +960,15 @@ export async function extractDashboardMessage(message: string): Promise<Dashboar
     });
   } catch (error) {
     if ((error as Error).name === "AbortError") {
+      if (externalSignal?.aborted) {
+        throw error; // user-initiated cancel — caller silences AbortError
+      }
       throw new Error("Extraction timed out. The model may still be loading — try again shortly.");
     }
     throw error;
   } finally {
     window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 
   if (!response.ok) {
@@ -1006,11 +1012,18 @@ export async function extractDashboardMessage(message: string): Promise<Dashboar
   return payload;
 }
 
-export async function queryLawDocuments(question: string, topK = 5): Promise<string> {
+export async function queryLawDocuments(question: string, topK = 5, externalSignal?: AbortSignal): Promise<string> {
   const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), RAG_TIMEOUT_MS);
+
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", onExternalAbort);
+  }
 
   let response: Response;
   try {
@@ -1022,11 +1035,15 @@ export async function queryLawDocuments(question: string, topK = 5): Promise<str
     });
   } catch (error) {
     if ((error as Error).name === "AbortError") {
+      if (externalSignal?.aborted) {
+        throw error; // user-initiated cancel — caller silences AbortError
+      }
       throw new Error("RAG query timed out. The model may still be loading — try again shortly.");
     }
     throw error;
   } finally {
     window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 
   if (!response.ok) {

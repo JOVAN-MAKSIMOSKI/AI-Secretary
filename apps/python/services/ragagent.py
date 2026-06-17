@@ -260,7 +260,7 @@ def get_qdrant_client() -> QdrantClient:
 	return QdrantClient(path=str(local_path))
 
 
-def get_query_engine(similarity_top_k: int = 5, streaming: bool = False) -> Any:
+def get_query_engine(similarity_top_k: int = 6, streaming: bool = False) -> Any:
 	"""Build a query engine from an existing Qdrant collection.
 
 	Expected environment variables:
@@ -288,7 +288,7 @@ def get_query_engine(similarity_top_k: int = 5, streaming: bool = False) -> Any:
 	return index.as_query_engine(similarity_top_k=similarity_top_k, streaming=streaming)
 
 
-def query_law_documents(question: str, similarity_top_k: int = 5) -> str:
+def query_law_documents(question: str, similarity_top_k: int = 6) -> str:
 	"""Convenience helper for one-off queries against the law collection."""
 	_assert_safe_question(question)
 	engine = get_query_engine(similarity_top_k=similarity_top_k, streaming=False)
