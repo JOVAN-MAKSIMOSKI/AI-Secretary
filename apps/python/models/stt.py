@@ -1,7 +1,7 @@
-"""Pydantic models for /stt endpoints."""
-
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TranscribeResponse(BaseModel):
-    pass  # TODO: define fields
+    text: str = Field(..., description="Transcribed text")
+    language: str = Field(..., description="Detected or forced language code")
+    duration: float = Field(..., description="Audio duration in seconds")

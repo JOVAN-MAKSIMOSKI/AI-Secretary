@@ -1063,3 +1063,43 @@ export async function queryLawDocuments(question: string, topK = 5, externalSign
   return data.answer;
 }
 
+const STT_TIMEOUT_MS = 30_000;
+
+export type TranscribeResponse = {
+  text: string;
+  language: string;
+  duration: number;
+};
+
+export async function transcribeAudio(audioBlob: Blob, filename: string): Promise<TranscribeResponse> {
+  const accessToken = await getAccessToken();
+
+  const form = new FormData();
+  form.append("audio", audioBlob, filename);
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), STT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${agentApiBaseUrl}/agent/transcribe`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorDetail(response, "Transcription failed."));
+    }
+
+    return (await response.json()) as TranscribeResponse;
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      throw new Error(`Transcription timed out after ${STT_TIMEOUT_MS / 1000}s.`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+

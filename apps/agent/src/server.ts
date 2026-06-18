@@ -2,6 +2,8 @@
 // All LLM calls and agent orchestration happen in this service
 import 'dotenv/config';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import multer from 'multer';
+import { transcribeAudio } from './tools/sttTool.js';
 import {
 	buildGmailConnectUrl,
 	completeGmailOAuthCallback,
@@ -558,6 +560,40 @@ app.post('/agent/resolve-and-run', requireAuth, async (req: AuthenticatedRequest
 		});
 	}
 });
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+app.post(
+	'/agent/transcribe',
+	requireAuth,
+	upload.single('audio'),
+	async (req: AuthenticatedRequest, res: Response) => {
+		if (!req.userAuthId) {
+			res.status(401).json({ error: 'Missing authenticated user.' });
+			return;
+		}
+
+		const file = req.file;
+		if (!file) {
+			res.status(400).json({ error: 'No audio file provided.' });
+			return;
+		}
+
+		try {
+			const tenantId = await getTenantForUser(req.userAuthId);
+			const result = await transcribeAudio(
+				tenantId,
+				file.buffer,
+				file.originalname || 'recording.webm',
+			);
+			res.json(result);
+		} catch (error) {
+			res.status(500).json({
+				error: error instanceof Error ? error.message : 'Transcription failed.',
+			});
+		}
+	},
+);
 
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {

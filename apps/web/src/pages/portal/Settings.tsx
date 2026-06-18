@@ -6,6 +6,7 @@ import {
   getGmailConnectUrl,
   type GmailConnectionStatusResponse,
 } from "../../connection/supabase-client";
+import { useAppContextStore, type SttMode } from "../../store/app-context";
 
 type Banner = {
   tone: "success" | "error";
@@ -17,9 +18,24 @@ const bannerToneClasses: Record<Banner["tone"], string> = {
   error: "border-rose-200 bg-rose-50 text-rose-700",
 };
 
+const STT_OPTIONS: { value: SttMode; label: string; description: string }[] = [
+  {
+    value: "review",
+    label: "Review before sending",
+    description: "Transcribed text appears in the input field. You can edit it before pressing send.",
+  },
+  {
+    value: "auto-send",
+    label: "Send immediately",
+    description: "Transcribed text is sent directly to the assistant without showing in the input field.",
+  },
+];
+
 export default function Settings() {
   const navigate = useNavigate();
   const location = useLocation();
+  const sttMode = useAppContextStore((state) => state.sttMode);
+  const setSttMode = useAppContextStore((state) => state.setSttMode);
   const [status, setStatus] = useState<GmailConnectionStatusResponse | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -171,6 +187,47 @@ export default function Settings() {
               </div>
             </div>
           ) : null}
+        </div>
+      </div>
+
+      {/* STT mode */}
+      <div className="mt-6 rounded-xl border border-[var(--brand-border)] bg-white p-6 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-text-muted)]">Settings</p>
+        <h2 className="mt-3 text-2xl font-semibold text-[var(--brand-ink)]">Voice Input Mode</h2>
+        <p className="mt-2 text-sm text-[var(--brand-text-muted)]">
+          Choose how transcribed speech is handled after you stop recording.
+        </p>
+
+        <div className="mt-6 flex flex-col gap-3">
+          {STT_OPTIONS.map((option) => {
+            const isSelected = sttMode === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setSttMode(option.value)}
+                className={[
+                  "flex items-start gap-4 rounded-lg border p-4 text-left transition",
+                  isSelected
+                    ? "border-[var(--brand-teal)] bg-[var(--brand-teal-soft)]"
+                    : "border-[var(--brand-border)] bg-[var(--brand-surface)] hover:border-[var(--brand-teal)]",
+                ].join(" ")}
+              >
+                <div className={[
+                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition",
+                  isSelected ? "border-[var(--brand-teal)]" : "border-[var(--brand-border)]",
+                ].join(" ")}>
+                  {isSelected && (
+                    <div className="h-2 w-2 rounded-full bg-[var(--brand-teal)]" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-[var(--brand-ink)]">{option.label}</p>
+                  <p className="mt-0.5 text-xs text-[var(--brand-text-muted)]">{option.description}</p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </section>

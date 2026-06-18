@@ -14,6 +14,7 @@ import {
 } from "../../connection/supabase-client";
 import { useAppContextStore } from "../../store/app-context";
 import { useDashboardChat, type ChatMessage } from "../../hooks/useAgent";
+import { useSTT } from "../../hooks/useSTT";
 
 function formatDateIso(dateValue: string): string {
   const parsed = new Date(dateValue);
@@ -310,6 +311,27 @@ export default function PortalDashboard() {
   );
   const [tasksLoadFailed, setTasksLoadFailed] = useState(false);
 
+  const sttMode = useAppContextStore((state) => state.sttMode);
+
+  const {
+    startRecording,
+    stopRecording,
+    isRecording,
+    isTranscribing,
+    transcript,
+    error: sttError,
+  } = useSTT();
+
+  useEffect(() => {
+    if (!transcript) return;
+    if (sttMode === "auto-send") {
+      void handleSendText(transcript);
+    } else {
+      setInput(transcript);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcript]);
+
   useEffect(() => {
     const timeMin = new Date().toISOString();
     const timeMax = new Date(Date.now() + TOMORROW_END_OFFSET_MS).toISOString();
@@ -349,21 +371,15 @@ export default function PortalDashboard() {
     setInvoiceDraft(null);
   };
 
-  const handleSend = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const content = input;
-    if (!content.trim() || isLoading) {
-      return;
-    }
+  const handleSendText = async (content: string) => {
+    if (!content.trim() || isLoading) return;
 
-    const newMessage: ChatMessage = {
+    addMessage({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       role: "user",
       content,
       createdAt: new Date().toISOString(),
-    };
-
-    addMessage(newMessage);
+    });
     setInput("");
     setIsLoading(true);
     setError(null);
@@ -376,13 +392,12 @@ export default function PortalDashboard() {
       const extracted = (resolveResponse.result?.extracted ?? {}) as ExtractedInvoiceFromMessage;
 
       if (resolveResponse.resolvedChainId !== "invoice_extraction") {
-        const assistantMessage: ChatMessage = {
+        addMessage({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           role: "assistant",
           content: formatNonInvoiceChainResponse(resolveResponse),
           createdAt: new Date().toISOString(),
-        };
-        addMessage(assistantMessage);
+        });
         return;
       }
 
@@ -393,27 +408,25 @@ export default function PortalDashboard() {
       const { payload, error: payloadError } = buildInvoicePayloadFromExtraction(enrichedDraft);
 
       if (!payload) {
-        const assistantMessage: ChatMessage = {
+        addMessage({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           role: "assistant",
           content: payloadError ?? "I extracted values but could not generate the invoice yet.",
           createdAt: new Date().toISOString(),
-        };
-        addMessage(assistantMessage);
+        });
       } else {
         const result = await createInvoiceDocument(payload);
         const downloadUrl = URL.createObjectURL(result.blob);
         setInvoiceDraft(null);
 
-        const assistantMessage: ChatMessage = {
+        addMessage({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           role: "assistant",
           content: "Invoice is ready. Use the link below to download it.",
           createdAt: new Date().toISOString(),
           downloadUrl,
           downloadLabel: result.filename,
-        };
-        addMessage(assistantMessage);
+        });
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
@@ -423,6 +436,11 @@ export default function PortalDashboard() {
       abortControllerRef.current = null;
       setIsLoading(false);
     }
+  };
+
+  const handleSend = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await handleSendText(input);
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -640,6 +658,11 @@ export default function PortalDashboard() {
                       {error}
                     </div>
                   )}
+                  {sttError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {sttError}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -649,19 +672,84 @@ export default function PortalDashboard() {
           <div className="border-t border-[var(--brand-border)] bg-[var(--brand-chat-bg)] px-4 py-4">
             <div className="mx-auto max-w-3xl">
               <form onSubmit={handleSend}>
-                <div className="flex items-end gap-3 rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] px-5 py-3 shadow-sm shadow-black/[0.04] focus-within:border-[var(--brand-teal)] focus-within:ring-1 focus-within:ring-[var(--brand-teal)] transition">
-                  <textarea
-                    value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                    onKeyDown={handleInputKeyDown}
-                    rows={1}
-                    maxLength={4000}
-                    disabled={isLoading}
-                    placeholder="Enter a prompt here"
-                    className="flex-1 resize-none bg-transparent text-sm text-[var(--brand-ink)] placeholder:text-[var(--brand-text-muted)] outline-none disabled:opacity-50 leading-6"
-                    style={{ maxHeight: "120px", overflowY: "auto" }}
-                  />
-                  {isLoading ? (
+                <div className="flex items-center gap-3 rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 py-3 shadow-sm shadow-black/[0.04] focus-within:border-[var(--brand-teal)] focus-within:ring-1 focus-within:ring-[var(--brand-teal)] transition">
+                  {/* Left button: mic (idle) or + (recording) */}
+                  {isRecording || isTranscribing ? (
+                    <button
+                      type="button"
+                      onClick={startRecording}
+                      disabled
+                      aria-label="Add"
+                      className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] opacity-40"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={startRecording}
+                      disabled={isLoading}
+                      aria-label="Start voice input"
+                      className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" strokeWidth="2" />
+                        <path d="M5 10a7 7 0 0014 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                        <line x1="12" y1="17" x2="12" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  )}
+
+                  {/* Center: waveform when recording, textarea otherwise */}
+                  {isRecording ? (
+                    <div className="flex flex-1 items-center justify-center gap-[3px] h-8 overflow-hidden">
+                      {Array.from({ length: 32 }).map((_, i) => (
+                        <span
+                          key={i}
+                          className="inline-block w-[2px] rounded-full bg-[var(--brand-text-muted)] animate-pulse"
+                          style={{
+                            height: `${8 + Math.sin(i * 0.8) * 6 + (i % 3) * 4}px`,
+                            animationDelay: `${(i * 50) % 600}ms`,
+                            animationDuration: `${600 + (i % 4) * 150}ms`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  ) : isTranscribing ? (
+                    <div className="flex flex-1 items-center justify-center gap-1.5 h-8">
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-text-muted)] [animation-delay:-0.3s]" />
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-text-muted)] [animation-delay:-0.15s]" />
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-text-muted)]" />
+                    </div>
+                  ) : (
+                    <textarea
+                      value={input}
+                      onChange={(event) => setInput(event.target.value)}
+                      onKeyDown={handleInputKeyDown}
+                      rows={1}
+                      maxLength={4000}
+                      disabled={isLoading}
+                      placeholder="Enter a prompt here"
+                      className="flex-1 resize-none bg-transparent text-sm text-[var(--brand-ink)] placeholder:text-[var(--brand-text-muted)] outline-none disabled:opacity-50 leading-6"
+                      style={{ maxHeight: "120px", overflowY: "auto" }}
+                    />
+                  )}
+
+                  {/* Right: stop-recording, stop-generation, or send */}
+                  {isRecording ? (
+                    <button
+                      type="button"
+                      onClick={stopRecording}
+                      aria-label="Stop recording"
+                      className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-ink)] transition hover:border-red-400 hover:text-red-500"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                        <rect x="1" y="1" width="10" height="10" rx="2" />
+                      </svg>
+                    </button>
+                  ) : isLoading ? (
                     <button
                       type="button"
                       onClick={handleStop}
@@ -675,7 +763,7 @@ export default function PortalDashboard() {
                   ) : (
                     <button
                       type="submit"
-                      disabled={!input.trim()}
+                      disabled={!input.trim() || isTranscribing}
                       className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--brand-teal)] text-white transition hover:bg-[#2f8575] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
