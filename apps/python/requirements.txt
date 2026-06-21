@@ -18,6 +18,7 @@ python-docx==1.2.0
 faster-whisper==1.2.1
 
 # RAG
+pymupdf==1.27.2.3
 llama-index==0.14.21
 llama-index-core==0.14.21
 llama-index-vector-stores-supabase==0.5.0
