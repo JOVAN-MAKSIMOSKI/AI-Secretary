@@ -17,7 +17,12 @@ apps/**/.env
 
 # Local virtual environments
 apps/python/venv/
+apps/python/.venv/
 **/venv/
+**/.venv/
+
+# Local Claude Code settings (machine-specific permissions)
+.claude/settings.local.json
 
 # Supabase local temp metadata
 supabase/.temp/
