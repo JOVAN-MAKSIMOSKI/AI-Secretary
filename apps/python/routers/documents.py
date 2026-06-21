@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from postgrest.exceptions import APIError
 
 from models.documents import DocumentResponse, ExtractionRequest, ExtractionResponse, InvoiceRequest
+from services.file_safety import UnsafeFileError, validate_ooxml
 from langchain import run_calendar_event_extraction, run_offer_extraction
 from services.invoices.excel import (
     extract_invoice_fields_from_message,
@@ -476,6 +477,11 @@ def create_template(
     # Generate template ID and read file
     template_id = str(uuid4())
     file_content = file.file.read()
+
+    try:
+        validate_ooxml(file_content)
+    except UnsafeFileError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Determine table name based on doc_type
     table_name = "templatesInvoice" if doc_type == "invoice" else "templatesOffer"

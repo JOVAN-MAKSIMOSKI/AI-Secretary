@@ -21,7 +21,7 @@ export const supabase: any =
       autoRefreshToken: true,
       detectSessionInUrl: true,
       persistSession: true,
-      storage: window.localStorage,
+      storage: window.sessionStorage,
     },
   }));
 
@@ -214,7 +214,7 @@ type CalendarEventsCache = {
 
 function readJsonCache<T>(key: string): { data: T; fetchedAt: number } | null {
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = window.sessionStorage.getItem(key);
     if (!raw) {
       return null;
     }
@@ -235,7 +235,7 @@ function readJsonCache<T>(key: string): { data: T; fetchedAt: number } | null {
 
 function writeJsonCache<T>(key: string, payload: { data: T; fetchedAt: number }): void {
   try {
-    window.localStorage.setItem(key, JSON.stringify(payload));
+    window.sessionStorage.setItem(key, JSON.stringify(payload));
   } catch {
     // Ignore storage quota and serialization failures.
   }
@@ -263,7 +263,7 @@ export function setCachedCalendarEvents(data: CalendarEventResponse[]): void {
 
 export function clearCachedCalendarEvents(): void {
   try {
-    window.localStorage.removeItem(CALENDAR_EVENTS_CACHE_KEY);
+    window.sessionStorage.removeItem(CALENDAR_EVENTS_CACHE_KEY);
   } catch {
     // Ignore storage failures.
   }
@@ -291,7 +291,7 @@ export function setCachedTasks(data: TaskResponse[]): void {
 
 export function clearCachedTasks(): void {
   try {
-    window.localStorage.removeItem(TASKS_CACHE_KEY);
+    window.sessionStorage.removeItem(TASKS_CACHE_KEY);
   } catch {
     // Ignore storage failures.
   }

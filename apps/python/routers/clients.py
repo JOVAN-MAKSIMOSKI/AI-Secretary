@@ -1,10 +1,13 @@
 """Clients router secured by authenticated owner identity."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid as _uuid_mod
 from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from models.client import ClientCreateRequest, ClientResponse, ClientUpdateRequest
 from services.auth import get_current_user_id
+from services.errors import safe_http_error
 from services.storage import supabase
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -12,6 +15,16 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 
 def _normalize_client_name(name: str) -> str:
     return " ".join(name.strip().split()).casefold()
+
+
+def _require_uuid(value: str, label: str) -> None:
+    try:
+        _uuid_mod.UUID(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{label} must be a valid UUID.",
+        )
 
 
 def require_tenant_owner_auth_id(tenant_identifier: str) -> str:
@@ -77,11 +90,10 @@ def create_client(
             )
             .execute()
         )
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create client: {exc}",
-        ) from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to create client.") from exc
 
     data = response.data or []
     if not data:
@@ -118,10 +130,7 @@ def get_clients_by_tenant(current_user_id: str = Depends(get_current_user_id)) -
             .execute()
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to query clients: {exc}",
-        ) from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to query clients.") from exc
 
     return [
         ClientResponse(
@@ -146,6 +155,7 @@ def update_client_by_id(
     payload: ClientUpdateRequest,
     current_user_id: str = Depends(get_current_user_id),
 ) -> ClientResponse:
+    _require_uuid(client_id, "client_id")
     owner_auth_id = require_tenant_owner_auth_id(current_user_id)
 
     try:
@@ -167,10 +177,7 @@ def update_client_by_id(
             .execute()
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to update client: {exc}",
-        ) from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to update client.") from exc
 
     updated_rows = response.data or []
     if not updated_rows:
@@ -199,6 +206,7 @@ def delete_client_by_id(
     client_id: str,
     current_user_id: str = Depends(get_current_user_id),
 ) -> dict:
+    _require_uuid(client_id, "client_id")
     owner_auth_id = require_tenant_owner_auth_id(current_user_id)
 
     try:
@@ -210,10 +218,7 @@ def delete_client_by_id(
             .execute()
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to delete client: {exc}",
-        ) from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to delete client.") from exc
 
     deleted_rows = response.data or []
     if not deleted_rows:

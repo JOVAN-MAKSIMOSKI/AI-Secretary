@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from difflib import SequenceMatcher
 from typing import Any, Mapping
 
 from services.storage import supabase
+
+logger = logging.getLogger(__name__)
+
+MAX_FUZZY_CANDIDATES = int(os.getenv("CLIENT_FUZZY_LIMIT", "200"))
 
 
 # Macedonian Cyrillic -> Latin transliteration for resilient matching.
@@ -203,14 +209,43 @@ def fetch_client_contact_by_name(owner_auth_id: str, client_name: str) -> dict[s
         rows = fallback_response.data or []
 
     if not rows:
+        # Use the longest raw token as the DB-level anchor for ilike so we avoid
+        # loading the full client table. The raw (non-transliterated) token is used
+        # deliberately: ilike runs against the stored name column, which may be
+        # Cyrillic or Latin — the raw input is more likely to share the same script.
+        raw_tokens = client_name.strip().split()
+        raw_anchor = max(raw_tokens, key=len) if raw_tokens else client_name.strip()
+
         fuzzy_response = (
             supabase.table("clients")
             .select("id, name, tax_number, email")
             .eq("tenant_id", owner_auth_id)
-            .limit(2000)
+            .ilike("name", f"%{raw_anchor}%")
+            .limit(MAX_FUZZY_CANDIDATES)
             .execute()
         )
         fuzzy_rows = fuzzy_response.data or []
+
+        # Cross-script case: Latin input vs Cyrillic DB (or vice versa) will return
+        # nothing from ilike. Fall back to loading all candidates so the
+        # transliteration-aware scorer can still find a match.
+        if not fuzzy_rows:
+            fallback_all = (
+                supabase.table("clients")
+                .select("id, name, tax_number, email")
+                .eq("tenant_id", owner_auth_id)
+                .limit(MAX_FUZZY_CANDIDATES)
+                .execute()
+            )
+            fuzzy_rows = fallback_all.data or []
+
+        if len(fuzzy_rows) == MAX_FUZZY_CANDIDATES:
+            logger.warning(
+                "Fuzzy client lookup hit cap of %d rows for tenant '%s' (anchor=%r)",
+                MAX_FUZZY_CANDIDATES,
+                owner_auth_id,
+                raw_anchor,
+            )
 
         if len(fuzzy_rows) == 1:
             rows = [fuzzy_rows[0]]

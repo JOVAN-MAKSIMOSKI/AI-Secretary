@@ -8,13 +8,19 @@ export interface TranscribeResult {
 }
 
 export async function transcribeAudio(
-  tenantId: string,
+  _tenantId: string,
   audioBuffer: Buffer,
-  filename: string
+  _filename: string
 ): Promise<TranscribeResult> {
+  const serviceSecret = process.env.INTER_SERVICE_SECRET ?? "";
+  if (!serviceSecret) {
+    throw new Error("INTER_SERVICE_SECRET is not configured.");
+  }
+
   const form = new FormData();
-  form.append("tenant_id", tenantId);
-  form.append("audio", new Blob([audioBuffer]), filename);
+  // Intentionally do NOT send tenant_id or filename to Python — the service
+  // authenticates via service secret and derives a safe suffix internally.
+  form.append("audio", new Blob([audioBuffer]), "recording.webm");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), STT_TIMEOUT_MS);
@@ -22,6 +28,7 @@ export async function transcribeAudio(
   try {
     const response = await fetch(`${PY_SERVICE_URL}/stt/transcribe`, {
       method: "POST",
+      headers: { "X-Service-Secret": serviceSecret },
       body: form,
       signal: controller.signal,
     });

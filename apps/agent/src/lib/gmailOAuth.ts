@@ -29,7 +29,7 @@ type GmailConnectionRow = {
 };
 
 const DEFAULT_REDIRECT_URI = 'http://localhost:3000/auth/google/gmail/callback';
-const DEFAULT_STATE_TTL_SECONDS = 600;
+const DEFAULT_STATE_TTL_SECONDS = 300;
 
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 export const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';

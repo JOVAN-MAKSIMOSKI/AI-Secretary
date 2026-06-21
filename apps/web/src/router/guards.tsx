@@ -43,3 +43,23 @@ export function PublicOnly({ children }: GuardProps) {
 
 	return children;
 }
+
+export function RequireAdmin({ children }: GuardProps) {
+	const isAuthenticated = useAppContextStore((state) => state.isAuthenticated);
+	const loading = useAppContextStore((state) => state.loading);
+	const isAdmin = useAppContextStore((state) => (state as { isAdmin?: boolean }).isAdmin ?? false);
+
+	if (loading) {
+		return <GuardLoading />;
+	}
+
+	if (!isAuthenticated) {
+		return <Navigate to="/login" replace />;
+	}
+
+	if (!isAdmin) {
+		return <Navigate to="/portal/dashboard" replace />;
+	}
+
+	return children;
+}

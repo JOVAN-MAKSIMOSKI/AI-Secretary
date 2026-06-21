@@ -11,6 +11,17 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
+    headers: {
+      'Content-Security-Policy': [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "connect-src 'self' https://*.supabase.co wss://*.supabase.co http://localhost:3000 http://localhost:8000",
+        "img-src 'self' data: blob:",
+        "font-src 'self'",
+        "frame-ancestors 'none'",
+      ].join('; '),
+    },
     proxy: {
       '/api': 'http://localhost:3001',
       '/agent-api': {

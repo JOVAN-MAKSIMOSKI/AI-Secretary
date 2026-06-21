@@ -36,7 +36,7 @@ const createChatStore = (storageName: string) =>
       }),
       {
         name: storageName,
-        storage: createJSONStorage(() => localStorage),
+        storage: createJSONStorage(() => sessionStorage),
       }
     )
   );

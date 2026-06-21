@@ -5,11 +5,14 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from services.auth import get_current_user_id
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/rag", tags=["rag"])
 
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -25,7 +28,9 @@ class RagQueryResponse(BaseModel):
 
 
 @router.post("/query", response_model=RagQueryResponse)
+@limiter.limit("20/minute")
 async def rag_query(
+    request: Request,
     payload: RagQueryRequest,
     _current_user_id: str = Depends(get_current_user_id),
 ) -> RagQueryResponse:

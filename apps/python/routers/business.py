@@ -9,6 +9,7 @@ from models.business import (
     BusinessRegisterResponse,
 )
 from services.auth import get_current_user_id
+from services.errors import safe_http_error
 from services.storage import supabase
 
 router = APIRouter(prefix="/business", tags=["business"])
@@ -42,10 +43,7 @@ def register_business(payload: BusinessRegisterRequest) -> BusinessRegisterRespo
             }
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create auth user: {exc}",
-        ) from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to create auth user.") from exc
 
     user = getattr(auth_response, "user", None)
     owner_auth_id = getattr(user, "id", None)
@@ -75,10 +73,7 @@ def register_business(payload: BusinessRegisterRequest) -> BusinessRegisterRespo
             .execute()
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create business: {exc}",
-        ) from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to create business.") from exc
 
     data = insert_response.data or []
     if not data:
@@ -106,10 +101,7 @@ def get_business_profile(current_user_id: str = Depends(get_current_user_id)) ->
     try:
         business = _get_business_by_owner_auth_id(current_user_id)
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to fetch business profile: {exc}",
-        ) from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to fetch business profile.") from exc
 
     if not business:
         raise HTTPException(
@@ -164,10 +156,7 @@ def create_business_profile(
             .execute()
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create business profile: {exc}",
-        ) from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to create business profile.") from exc
 
     data = response.data or []
     if not data:
