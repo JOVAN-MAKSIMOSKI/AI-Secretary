@@ -31,9 +31,13 @@ async def transcribe(
 
     Internal endpoint — only callable from the agent service via X-Service-Secret.
     """
-    content = await audio.read()
-    if len(content) > _AUDIO_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="Audio file too large. Maximum 25 MB.")
+    # Read in chunks and abort once the cap is exceeded, so an oversized upload never
+    # gets fully buffered into memory before rejection.
+    content = bytearray()
+    while chunk := await audio.read(1024 * 1024):
+        content.extend(chunk)
+        if len(content) > _AUDIO_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Audio file too large. Maximum 25 MB.")
 
     raw_suffix = os.path.splitext(audio.filename or "")[1].lower()
     suffix = raw_suffix if raw_suffix in _SAFE_AUDIO_SUFFIXES else ".webm"

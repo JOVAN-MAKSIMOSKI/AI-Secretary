@@ -11,6 +11,18 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# Fail the boot with one clear error if required env vars are missing, instead of
+# booting healthy and only failing per-request (e.g. STT returning 503/403).
+# Runs before the router imports below, which load the Whisper model at import time.
+_REQUIRED_ENV_VARS = ("INTER_SERVICE_SECRET", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")
+_missing_env_vars = [name for name in _REQUIRED_ENV_VARS if not os.getenv(name)]
+if _missing_env_vars:
+    raise RuntimeError(
+        "Missing required environment variables: "
+        + ", ".join(_missing_env_vars)
+        + ". Set them in apps/python/.env (INTER_SERVICE_SECRET must match apps/agent/.env)."
+    )
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

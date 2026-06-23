@@ -21,7 +21,11 @@ export const supabase: any =
       autoRefreshToken: true,
       detectSessionInUrl: true,
       persistSession: true,
-      storage: window.sessionStorage,
+      // localStorage persists the session across reloads/restarts (the UX requirement).
+      // Accepted tradeoff: it is readable by JS, so it offers no XSS protection over
+      // sessionStorage — only httpOnly cookies would. The compensating control is XSS
+      // prevention (helmet/CSP in apps/agent/src/server.ts), not the storage choice.
+      storage: window.localStorage,
     },
   }));
 
@@ -206,11 +210,6 @@ type TasksCache = {
 };
 
 let tasksCache: TasksCache | null = null;
-
-type CalendarEventsCache = {
-  data: CalendarEventResponse[];
-  fetchedAt: number;
-};
 
 function readJsonCache<T>(key: string): { data: T; fetchedAt: number } | null {
   try {

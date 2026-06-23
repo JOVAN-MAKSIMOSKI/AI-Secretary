@@ -13,7 +13,7 @@ import {
   type InvoiceDocumentRequest,
 } from "../../connection/supabase-client";
 import { useAppContextStore } from "../../store/app-context";
-import { useDashboardChat, type ChatMessage } from "../../hooks/useAgent";
+import { useDashboardChat } from "../../hooks/useAgent";
 import { useSTT } from "../../hooks/useSTT";
 
 function formatDateIso(dateValue: string): string {
@@ -331,6 +331,13 @@ export default function PortalDashboard() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcript]);
+
+  // Pressing record discards any text sitting in the input and starts a fresh
+  // recording, so a prior/half-typed message is never carried into the next take.
+  const handleStartRecording = () => {
+    setInput("");
+    startRecording();
+  };
 
   useEffect(() => {
     const timeMin = new Date().toISOString();
@@ -677,7 +684,7 @@ export default function PortalDashboard() {
                   {isRecording || isTranscribing ? (
                     <button
                       type="button"
-                      onClick={startRecording}
+                      onClick={handleStartRecording}
                       disabled
                       aria-label="Add"
                       className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] opacity-40"
@@ -689,7 +696,7 @@ export default function PortalDashboard() {
                   ) : (
                     <button
                       type="button"
-                      onClick={startRecording}
+                      onClick={handleStartRecording}
                       disabled={isLoading}
                       aria-label="Start voice input"
                       className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)] disabled:opacity-40 disabled:cursor-not-allowed"

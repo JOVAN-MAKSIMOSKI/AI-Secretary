@@ -283,16 +283,20 @@ interface AgentState {
 
 ---
 
-## Shared Packages
+## Shared Packages & Local Modules
 
-These packages are available to import across `apps/agent`:
+The only shared workspace package is:
 
-- `packages/shared-types` — `Tenant`, `Client`, `Document`, `Interaction` interfaces
-- `packages/config` — Zod env schemas per service (validates env vars at startup)
-- `packages/logger` — Shared pino logger config — use this instead of `console.log`
+- `packages/shared-types` — `Business`, `Client`, `Invoice`, `Offer`, `Task` interfaces (mirror the real Prisma schema, `snake_case` to match the API contract)
+
+Env validation and logging are **local agent modules**, not shared packages:
+
+- `src/lib/env.ts` — `validateAgentEnv()`, called once at startup in `server.ts`; fails the boot on missing/malformed env vars
+- `src/lib/logger.ts` — structured logger; use this instead of `console.log`
 
 Import example:
 ```typescript
 import type { Client } from '@secretary/shared-types';
-import { logger } from '@secretary/logger';
+import { logger } from './lib/logger.js';
+import { validateAgentEnv } from './lib/env.js';
 ```

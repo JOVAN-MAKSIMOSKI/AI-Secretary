@@ -9,7 +9,7 @@
     "moduleResolution": "bundler",
     "lib": ["ESNext", "DOM"],
     "types": ["node"],
-    "rootDir": ".",
+    "rootDir": "src",
 
     "skipLibCheck": true,
     "noUnusedLocals": true,
@@ -17,11 +17,11 @@
     "resolveJsonModule": true,
     
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "*.ts", "*.config.ts"],
+  "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }

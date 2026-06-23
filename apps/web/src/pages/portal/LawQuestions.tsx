@@ -40,6 +40,13 @@ export default function LawQuestions() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcript]);
 
+  // Pressing record discards any text sitting in the input and starts a fresh
+  // recording, so a prior/half-typed message is never carried into the next take.
+  const handleStartRecording = () => {
+    setInput("");
+    startRecording();
+  };
+
   const handleStop = () => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
@@ -197,7 +204,7 @@ export default function LawQuestions() {
               ) : (
                 <button
                   type="button"
-                  onClick={startRecording}
+                  onClick={handleStartRecording}
                   disabled={isLoading}
                   aria-label="Start voice input"
                   className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)] disabled:opacity-40 disabled:cursor-not-allowed"

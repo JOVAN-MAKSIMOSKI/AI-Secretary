@@ -2,6 +2,7 @@
 // CSRF: All state-changing routes require Authorization: Bearer, which browsers
 // cannot send cross-origin without a CORS preflight — no additional CSRF token is needed.
 import 'dotenv/config';
+import { validateAgentEnv } from './lib/env.js';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -143,6 +144,10 @@ function redirectWithResult(returnTo: string | undefined, statusValue: 'success'
 }
 
 // --- App setup ---
+
+// Fail the boot with one aggregated error if required env vars are missing or
+// malformed, rather than throwing lazily the first time STT or OAuth is used.
+validateAgentEnv();
 
 const allowedOrigins = (process.env.AGENT_CORS_ALLOW_ORIGINS || 'http://localhost:5174')
 	.split(',')
@@ -318,15 +323,15 @@ app.get('/gmail/inbox/stats', requireAuth, async (req: AuthenticatedRequest, res
 		const stats = await getGmailInboxStats(tenantId, userAuthId);
 		res.json({ ...stats, connected: true });
 	} catch (error) {
-		// Return 200 for expected "not available" states so the dashboard never logs a console error.
+		// Always return 200 with connected:false so the dashboard never logs a console error.
+		// Log unexpected errors server-side but never surface them to the client.
 		if (
-			error instanceof GmailReconnectRequiredError ||
-			(error instanceof Error && error.message.includes('No tenant/business'))
+			!(error instanceof GmailReconnectRequiredError) &&
+			!(error instanceof Error && error.message.includes('No tenant/business'))
 		) {
-			res.json({ unreadCount: 0, connected: false });
-			return;
+			toSafeError(error, 'Failed to fetch inbox stats.');
 		}
-		res.status(500).json({ error: toSafeError(error, 'Failed to fetch inbox stats.') });
+		res.json({ unreadCount: 0, connected: false });
 	}
 });
 

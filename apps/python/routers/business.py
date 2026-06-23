@@ -1,6 +1,8 @@
 """Business router — registration plus authenticated business profile routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from models.business import (
     BusinessProfileCreateRequest,
@@ -12,6 +14,7 @@ from services.auth import get_current_user_id
 from services.errors import safe_http_error
 from services.storage import supabase
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/business", tags=["business"])
 
 
@@ -32,8 +35,12 @@ def _get_business_by_owner_auth_id(owner_auth_id: str):
 
 
 @router.post("/register", response_model=BusinessRegisterResponse, status_code=status.HTTP_201_CREATED)
-def register_business(payload: BusinessRegisterRequest) -> BusinessRegisterResponse:
+@limiter.limit("3/hour")
+def register_business(request: Request, payload: BusinessRegisterRequest) -> BusinessRegisterResponse:
     # 1) Create the single business user in Supabase Auth (server-side admin call).
+    # This endpoint is public; abuse is mitigated by the rate limit above. email_confirm is
+    # kept True to preserve the register->auto-login signup flow (SignUp.tsx). Moving to real
+    # email verification requires changing that flow and configuring Supabase SMTP.
     try:
         auth_response = supabase.auth.admin.create_user(
             {

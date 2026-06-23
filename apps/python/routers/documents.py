@@ -33,6 +33,9 @@ from services.storage import (
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
 _UNKNOWN_COLUMN_PATTERN = re.compile(r"Could not find the '([^']+)' column", re.IGNORECASE)
+# Matches the compressed-size cap enforced by validate_ooxml; used to abort an oversized
+# template upload before it is fully buffered into memory.
+_TEMPLATE_MAX_BYTES = 10 * 1024 * 1024
 
 
 def _extract_unknown_column_name(exc: Exception) -> str | None:
@@ -474,9 +477,22 @@ def create_template(
         )
     owner_auth_id = business.data[0]["owner_auth_id"]
 
-    # Generate template ID and read file
+    # Generate template ID and read file.
+    # Read in chunks and abort once the cap is exceeded, so an oversized upload never
+    # gets fully buffered into memory before validate_ooxml runs.
     template_id = str(uuid4())
-    file_content = file.file.read()
+    file_bytes = bytearray()
+    while True:
+        chunk = file.file.read(1024 * 1024)
+        if not chunk:
+            break
+        file_bytes.extend(chunk)
+        if len(file_bytes) > _TEMPLATE_MAX_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large. Maximum {_TEMPLATE_MAX_BYTES // (1024 * 1024)} MB.",
+            )
+    file_content = bytes(file_bytes)
 
     try:
         validate_ooxml(file_content)

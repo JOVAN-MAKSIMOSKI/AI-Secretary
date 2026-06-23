@@ -120,6 +120,6 @@ These apply to every task in every file, no exceptions.
 - Both require Gmail OAuth to be connected first (`gmail_oauth_connections` table).
 
 ### Packages
-- `packages/shared-types` — shared TS interfaces (`Tenant`, `Client`, `Document`, `Interaction`), import from `@secretary/shared-types`
-- `packages/config` — Zod env validation schemas, run at startup
-- `packages/logger` — pino logger, use instead of `console.log`
+- `packages/shared-types` — shared TS interfaces (`Business`, `Client`, `Invoice`, `Offer`, `Task`) mirroring the real schema, import from `@secretary/shared-types`
+- Env validation lives per-service, not in a shared package: `apps/agent/src/lib/env.ts` (`validateAgentEnv`, called at startup in `server.ts`) and the env guard at the top of `apps/python/main.py`.
+- Logging lives per-service: `apps/agent/src/lib/logger.ts`. There is no shared logger package.
