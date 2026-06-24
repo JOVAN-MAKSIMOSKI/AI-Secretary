@@ -9,6 +9,14 @@ import cors from 'cors';
 import { rateLimit } from 'express-rate-limit';
 import multer from 'multer';
 import { transcribeAudio } from './tools/sttTool.js';
+import { validateTwilioSignature } from './twilio/twilioAuth.js';
+import {
+	handleVoiceEntry,
+	handleRecording,
+	handleProcessingPoll,
+	handleCallStatus,
+	serveAudio,
+} from './twilio/callHandler.js';
 import {
 	buildGmailConnectUrl,
 	completeGmailOAuthCallback,
@@ -671,6 +679,37 @@ app.post(
 		}
 	},
 );
+
+// --- Twilio voice webhook routes ---
+// All callers reach a single fixed number. Tenant identity is resolved from the
+// caller's phone number (From) registered in twilio_phone_registrations.
+// Twilio signature validation guards webhook authenticity; no Bearer token is used.
+// The audio-serve and processing-poll routes are excluded from signature validation —
+// Twilio fetches audio / polls without a webhook signature.
+
+app.post('/calls/voice', validateTwilioSignature, async (req: Request, res: Response) => {
+	await handleVoiceEntry(req, res);
+});
+
+app.post('/calls/recording', validateTwilioSignature, async (req: Request, res: Response) => {
+	await handleRecording(req, res);
+});
+
+app.get('/calls/processing/:jobId', (req: Request, res: Response) => {
+	const jobId = String(req.params.jobId ?? '');
+	handleProcessingPoll(jobId, req, res);
+});
+
+app.post('/calls/status', validateTwilioSignature, (req: Request, res: Response) => {
+	handleCallStatus(req, res);
+	res.status(204).send();
+});
+
+app.get('/calls/audio/:audioId', (req: Request, res: Response) => {
+	const audioId = String(req.params.audioId ?? '');
+	serveAudio(audioId, res);
+});
+
 
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {

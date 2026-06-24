@@ -21,6 +21,9 @@ apps/python/.venv/
 **/venv/
 **/.venv/
 
+# Twilio recording-encryption key material (private key lives only in .env)
+*.pem
+
 # Local Claude Code settings (machine-specific permissions)
 .claude/settings.local.json
 
