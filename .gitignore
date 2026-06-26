@@ -2,6 +2,10 @@
 node_modules/
 frontend/node_modules/
 frontend/dist/
+apps/**/dist/
+
+# Qdrant local vector DB data
+**/qdrant_data/
 
 # Python
 backend/.venv/
