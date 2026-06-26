@@ -749,6 +749,39 @@ export async function uploadDocumentTemplate(payload: {
   return (await response.json()) as DocumentTemplateResponse;
 }
 
+export type PendingInvoice = {
+  id: string;
+  invoice_number: string;
+  created_at: string;
+};
+
+export async function getPendingCallInvoices(): Promise<{ count: number; invoices: PendingInvoice[] }> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/invoices/pending-call-downloads`, { headers });
+  if (!response.ok) throw new Error('Failed to fetch pending call invoices.');
+  return response.json() as Promise<{ count: number; invoices: PendingInvoice[] }>;
+}
+
+export async function downloadCallInvoicesZip(): Promise<Blob> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/invoices/call-downloads/zip`, {
+    method: 'POST',
+    headers,
+  });
+  if (!response.ok) throw new Error('Failed to download invoice ZIP.');
+  return response.blob();
+}
+
+export async function confirmCallInvoicesDownloaded(ids: string[]): Promise<void> {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/invoices/call-downloads/confirm`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ids }),
+  });
+  if (!response.ok) throw new Error('Failed to confirm invoice downloads.');
+}
+
 export async function createInvoiceDocument(payload: InvoiceDocumentRequest): Promise<{
   blob: Blob;
   filename: string;

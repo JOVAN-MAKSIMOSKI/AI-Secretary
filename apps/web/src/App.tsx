@@ -8,6 +8,7 @@ import PortalCalendar from "./pages/portal/Calendar.tsx";
 import PortalClients from "./pages/portal/Clients";
 import PortalDashboard from "./pages/portal/Dashboard";
 import PortalDocuments from "./pages/portal/Documents";
+import PortalContact from "./pages/portal/Contact";
 import PortalLawQuestions from "./pages/portal/LawQuestions";
 import PortalSettings from "./pages/portal/Settings";
 import { PublicOnly, RequireAuth } from "./router/guards";
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="clients" element={<PortalClients />} />
           <Route path="documents" element={<PortalDocuments />} />
           <Route path="calendar" element={<PortalCalendar />} />
+          <Route path="contact" element={<PortalContact />} />
           <Route path="law-questions" element={<PortalLawQuestions />} />
           <Route path="settings" element={<PortalSettings />} />
         </Route>

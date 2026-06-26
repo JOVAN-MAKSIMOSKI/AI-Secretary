@@ -9,7 +9,7 @@ from decimal import Decimal
 import logging
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form, File
+from fastapi import APIRouter, Depends, Header, HTTPException, status, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
 from postgrest.exceptions import APIError
 
@@ -24,9 +24,10 @@ from services.invoices.excel import (
     render_invoice_template_bytes,
 )
 from services.invoices.invoice_text import amount_to_macedonian_text
-from services.auth import get_current_user_id
+from services.auth import get_current_user_id, get_current_user_id_or_service
 from services.storage import (
     supabase,
+    upload_invoice_document,
     upload_template_document,
 )
 
@@ -67,7 +68,13 @@ def _insert_invoice_with_schema_fallback(insert_data: dict[str, Any]) -> None:
             if unknown_column is None or unknown_column not in payload:
                 raise
 
-            # Handle schema drift between deployed PostgREST schema and local code.
+            # Schema drift: the deployed DB is behind the local Prisma schema.
+            # Log loudly so this is never silent.
+            logger.warning(
+                "Schema drift detected — dropping unknown column '%s' from invoice INSERT. "
+                "Apply the pending Prisma migration to fix this.",
+                unknown_column,
+            )
             payload.pop(unknown_column, None)
 
 
@@ -93,7 +100,12 @@ def _update_invoice_with_schema_fallback(
             if unknown_column is None or unknown_column not in payload:
                 raise
 
-            # Handle schema drift between deployed PostgREST schema and local code.
+            # Schema drift: the deployed DB is behind the local Prisma schema.
+            logger.warning(
+                "Schema drift detected — dropping unknown column '%s' from invoice UPDATE. "
+                "Apply the pending Prisma migration to fix this.",
+                unknown_column,
+            )
             payload.pop(unknown_column, None)
 
 
@@ -124,7 +136,7 @@ def _increment_business_invoice_counter(owner_auth_id: str) -> None:
 @router.post("/extract", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
 def extract_from_raw_message(
     payload: ExtractionRequest,
-    current_user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id_or_service),
 ) -> ExtractionResponse:
     """Run the LangChain extraction chain against the raw message text."""
     try:
@@ -155,7 +167,7 @@ def extract_from_raw_message(
 @router.post("/extract-calendar", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
 def extract_calendar_from_raw_message(
     payload: ExtractionRequest,
-    current_user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id_or_service),
 ) -> ExtractionResponse:
     """Run the calendar extraction chain against the raw message text."""
     try:
@@ -183,7 +195,7 @@ def extract_calendar_from_raw_message(
 @router.post("/extract-offer", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
 def extract_offer_from_raw_message(
     payload: ExtractionRequest,
-    current_user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id_or_service),
 ) -> ExtractionResponse:
     """Run the offer extraction chain against the raw message text."""
     try:
@@ -229,7 +241,8 @@ def _parse_optional_due_date(raw_due_date: Optional[str]) -> Optional[datetime]:
 @router.post("/invoice", status_code=status.HTTP_200_OK)
 def create_invoice(
     payload: Optional[InvoiceRequest] = None,
-    current_user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id_or_service),
+    x_invoice_origin: str = Header(default="manual"),
 ) -> StreamingResponse:
     """Fetch the stored invoice template bytes and stream them back."""
     owner_auth_id_str = str(UUID(current_user_id))
@@ -329,17 +342,24 @@ def create_invoice(
         existing_rows = existing_invoice.data or []
         if existing_rows:
             invoice_id = existing_rows[0]["id"]
+            update_data = dict(invoice_common_data)
+            # If the invoice is being re-generated via a voice call, stamp it so it
+            # appears in the dashboard's "Call Invoices" card regardless of its previous origin.
+            if x_invoice_origin == "call":
+                update_data["origin"] = "call"
             _update_invoice_with_schema_fallback(
                 invoice_id=invoice_id,
                 tenant_id=resolved_owner_auth_id,
-                update_data=invoice_common_data,
+                update_data=update_data,
             )
         else:
             invoice_id = str(uuid4())
             storage_path = f"{resolved_owner_auth_id}/invoices/{invoice_id}.xlsx"
+            origin = x_invoice_origin if x_invoice_origin in ("manual", "call") else "manual"
             insert_data = {
                 "id": invoice_id,
                 "storagePath": storage_path,
+                "origin": origin,
                 **invoice_common_data,
             }
             _insert_invoice_with_schema_fallback(insert_data)
@@ -389,6 +409,10 @@ def create_invoice(
             template_payload["template_bytes"],
             invoice_render_values,
         )
+        try:
+            upload_invoice_document(resolved_owner_auth_id, invoice_id, rendered_template_bytes)
+        except Exception:
+            logger.exception("Storage upload failed for invoice %s — continuing with stream", invoice_id)
 
     filename = f"{template_payload['template_name']}.xlsx"
     return StreamingResponse(

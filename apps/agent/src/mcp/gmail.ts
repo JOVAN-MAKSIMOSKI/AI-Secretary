@@ -94,7 +94,7 @@ export const sendSmtpTestEmail = sendGmailTestEmail;
 /**
  * Fetch document file from Supabase storage
  */
-async function getDocumentBuffer(
+export async function getDocumentBuffer(
   tenantId: string,
   documentId: string,
   documentType: 'invoice' | 'offer'

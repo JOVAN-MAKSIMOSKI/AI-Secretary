@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { supabase } from "../connection/supabase-client";
-import { Brain, CalendarDays, CircleHelp, FileText, LayoutDashboard, Settings, Sparkles, Users } from "lucide-react";
+import { Brain, CalendarDays, CircleHelp, FileText, LayoutDashboard, Phone, Settings, Sparkles, Users } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", to: "/portal/dashboard", icon: LayoutDashboard },
   { label: "Clients", to: "/portal/clients", icon: Users },
   { label: "Documents", to: "/portal/documents", icon: FileText },
   { label: "Calendar", to: "/portal/calendar", icon: CalendarDays },
+  { label: "Contact", to: "/portal/contact", icon: Phone },
   { label: "Law Questions", to: "/portal/law-questions", icon: Brain },
   { label: "Settings", to: "/portal/settings", icon: Settings },
 ];

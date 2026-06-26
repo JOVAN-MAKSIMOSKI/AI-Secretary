@@ -1,12 +1,18 @@
-MAKE THE DESIGN BETTER
+order number isnt interpreted correctly
+latency needs major improvements!
+make the secreatry calls bitolski
+GLM
+get codex to try and hack teh app
+test the new stt model
+ ● The auth-token-in-localStorage finding is the tradeoff we chose earlier to fix your re-login issue. What do you want to do? consider thia
 AGENT
 Offers, transportni...
 STT - when performing it, the time format should be always converted to 12:30, 12:45...
 RAG
-Currently need to console.log everything that comes in from qdrant and debug later on, there is a script inside /services, run it to diagnose the issues, maybe an embedding model used is not good enough.
-decide exactly what should be done with the agent memory and how to keep the chat exactly.
-query engine built by the service? What happens?  investigate the service deeper.
-The chat needs to be kept in
+what happens witht the vectors stored from the chat into qdrant? Should we make them as a context
+
+make the app production ready
+delete all the debuging scripts and files
 
 
 
@@ -21,7 +27,6 @@ If several routers end up sharing similar prompts, you can consolidate them into
 
 
 
-Chat history should be set in react state. We can send older chats to context memory
 
 Implement memory to the agent, Regarding the memory, should the agent perform based on memory or just return information.
 "Write a follow-up email to Tom"
@@ -30,7 +35,7 @@ With memory: agent knows the last email was formal,
              Tom usually replies within 2 days
 
 
-
+ngrok http 3000
 
 
 
@@ -49,11 +54,7 @@ Optional: open ReDoc
 cmd.exe /c start http://127.0.0.1:8000/redoc
 
 
-Semantic search could be added for the word offers/
 
-
-
-The first time it triggers, the Codex runtime will start on demand. To disable it later, run /codex:setup --disable-review-gate.
 
 
 How the "Big Players" Do ItEnterprise apps (like Slack, Microsoft Teams, or custom AI agents) use a hybrid approach:The Source of Truth (Server): All chats are stored in a secure, relational or NoSQL database. This ensures data is backed up, encrypted, and available everywhere.The Cache (Client/Redis): They use "hot" caches (like Redis on the server or IndexedDB in the browser) to make the chat feel instant.IndexedDB is the professional version of localStorage. It is asynchronous, supports large amounts of data, and handles structured queries. If you must store data on the client side, use IndexedDB, not localStorage.Synchronization: The frontend requests the latest messages from the API, and the server validates the user's session before sending the data.My Recommendation for Your "AI-Secretary"  Since you are currently in the "building/MVP" phase, using localStorage with your Zustand store is perfectly acceptable for local testing and rapid iteration. It gets your UI working today without needing to write complex database migrations.However, add a "Migration Path" to your plan:Don't build your entire product architecture around localStorage. Treat the localStorage implementation as a temporary UI cache. Eventually, when you decide to take the app to production, you can simply swap out your store/chat.ts persistence layer to fetch from an API endpoint instead of the browser's storage, and your UI components won't even know the difference!
@@ -66,3 +67,6 @@ n — no, skip it
 d — show a more detailed diff before deciding
 a — accept all remaining changes in this batch
 e — open the file in your editor to review before decidingd
+
+
+9PXAHY82ZS6PPHUG3MPYRGU9

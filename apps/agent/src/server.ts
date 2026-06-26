@@ -10,6 +10,7 @@ import { rateLimit } from 'express-rate-limit';
 import multer from 'multer';
 import { transcribeAudio } from './tools/sttTool.js';
 import { validateTwilioSignature } from './twilio/twilioAuth.js';
+import { generateWebRtcToken } from './twilio/tokenService.js';
 import {
 	handleVoiceEntry,
 	handleRecording,
@@ -27,7 +28,8 @@ import {
 } from './lib/gmailOAuth.js';
 import { runDirectResolverChain } from './agent/directResolverChain.js';
 import { createCalendarEvent, deleteCalendarEvent, listCalendarEvents } from './mcp/calendar.js';
-import { getGmailInboxStats } from './mcp/gmail.js';
+import { getGmailInboxStats, getDocumentBuffer } from './mcp/gmail.js';
+import JSZip from 'jszip';
 import { supabase } from './lib/supabase.js';
 import { writeAuditLog } from './repository/auditLogs.js';
 import { logger } from './lib/logger.js';
@@ -180,6 +182,9 @@ app.use(
 );
 
 app.use(express.json({ limit: '1mb' }));
+// Twilio webhooks POST application/x-www-form-urlencoded; without this, req.body is
+// empty and Twilio signature validation fails with 403 on every /calls/* route.
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
 const globalLimiter = rateLimit({
 	windowMs: 60_000,
@@ -600,6 +605,91 @@ app.delete('/tasks/:taskId', requireAuth, async (req: AuthenticatedRequest, res:
 	}
 });
 
+// --- Call-invoice download card routes ---
+
+app.get('/invoices/pending-call-downloads', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('invoices')
+			.select('id, invoice_number, created_at')
+			.eq('tenant_id', tenantId)
+			.eq('origin', 'call')
+			.is('downloaded_at', null)
+			.order('created_at', { ascending: true });
+		if (error) throw new Error(error.message);
+		const invoices = data ?? [];
+		res.json({ count: invoices.length, invoices });
+	} catch (error) {
+		res.status(400).json({ error: toSafeError(error, 'Failed to fetch pending call invoices.') });
+	}
+});
+
+app.post('/invoices/call-downloads/zip', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('invoices')
+			.select('id')
+			.eq('tenant_id', tenantId)
+			.eq('origin', 'call')
+			.is('downloaded_at', null)
+			.order('created_at', { ascending: true });
+		if (error) throw new Error(error.message);
+		const pending = data ?? [];
+		if (pending.length === 0) {
+			res.status(404).json({ error: 'No pending call invoices to download.' });
+			return;
+		}
+		const zip = new JSZip();
+		for (const inv of pending) {
+			const { buffer, filename } = await getDocumentBuffer(tenantId, inv.id as string, 'invoice');
+			zip.file(filename, buffer);
+		}
+		const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+		res.setHeader('Content-Type', 'application/zip');
+		res.setHeader('Content-Disposition', 'attachment; filename="invoices.zip"');
+		res.send(zipBuffer);
+	} catch (error) {
+		res.status(500).json({ error: toSafeError(error, 'Failed to build invoice ZIP.') });
+	}
+});
+
+app.post('/invoices/call-downloads/confirm', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	const rawIds: unknown = req.body?.ids;
+	if (!Array.isArray(rawIds) || rawIds.length === 0) {
+		res.status(422).json({ error: 'ids must be a non-empty array.' });
+		return;
+	}
+	const ids = rawIds.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id));
+	if (ids.length === 0) {
+		res.status(422).json({ error: 'No valid invoice ids provided.' });
+		return;
+	}
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		// Return the rows actually updated (not ids.length) so the count reflects only
+		// invoices that matched the tenant + origin='call' filter — never over-reports.
+		const { data, error } = await supabase
+			.from('invoices')
+			.update({ downloaded_at: new Date().toISOString() })
+			.eq('tenant_id', tenantId)
+			.in('id', ids)
+			.eq('origin', 'call')
+			.select('id');
+		if (error) throw new Error(error.message);
+		res.json({ confirmed: data?.length ?? 0 });
+	} catch (error) {
+		res.status(400).json({ error: toSafeError(error, 'Failed to confirm invoice downloads.') });
+	}
+});
+
 app.post(
 	'/agent/resolve-and-run',
 	requireAuth,
@@ -679,6 +769,18 @@ app.post(
 		}
 	},
 );
+
+// --- Twilio WebRTC token endpoint ---
+// No auth required — the grant only allows outbound calls to your own TwiML App.
+// Open this in voice-test.html to get a token for the browser SDK.
+app.get('/calls/token', (_req: Request, res: Response) => {
+  try {
+    const token = generateWebRtcToken();
+    res.json({ token, identity: 'dev' });
+  } catch (err) {
+    res.status(500).json({ error: toSafeError(err, 'WebRTC token generation failed') });
+  }
+});
 
 // --- Twilio voice webhook routes ---
 // All callers reach a single fixed number. Tenant identity is resolved from the

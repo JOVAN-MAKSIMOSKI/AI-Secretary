@@ -4,7 +4,7 @@ import logging
 import os
 import tempfile
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -25,6 +25,7 @@ _AUDIO_MAX_BYTES = 25 * 1024 * 1024  # 25 MB
 async def transcribe(
     request: Request,
     audio: UploadFile = File(...),
+    language: str = Form("mk"),
     _service: None = Depends(verify_service_secret),
 ) -> TranscribeResponse:
     """Transcribe audio using faster-whisper.
@@ -50,9 +51,9 @@ async def transcribe(
 
         segments, info = model.transcribe(
             tmp_path,
-            language="mk",    # Force Macedonian — never auto-detect
+            language=language,  # Caller-supplied; defaults to Macedonian
             beam_size=5,
-            vad_filter=True,  # Strip silence before transcribing
+            vad_filter=True,    # Strip silence before transcribing
         )
         text = " ".join(segment.text for segment in segments)
         return TranscribeResponse(

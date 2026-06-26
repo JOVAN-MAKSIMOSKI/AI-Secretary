@@ -39,6 +39,10 @@ const agentEnvSchema = z
     ELEVENLABS_VOICE_ID: z.string().optional(),
     ELEVENLABS_MODEL_ID: z.string().default('eleven_multilingual_v2'),
     AGENT_PUBLIC_URL: z.string().url().optional(),
+    TWILIO_API_KEY_SID: z.string().optional(),
+    TWILIO_API_KEY_SECRET: z.string().optional(),
+    TWILIO_TWIML_APP_SID: z.string().startsWith('AP').optional(),
+    TWILIO_DEV_TENANT_ID: z.string().optional(),
   })
   .refine((env) => Boolean(env.GMAIL_OAUTH_STATE_SECRET || env.GOOGLE_OAUTH_STATE_SECRET), {
     message: 'GMAIL_OAUTH_STATE_SECRET (or GOOGLE_OAUTH_STATE_SECRET) is required',

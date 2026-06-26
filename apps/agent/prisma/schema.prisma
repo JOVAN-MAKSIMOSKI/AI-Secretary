@@ -58,8 +58,10 @@ model invoices {
   due_date    DateTime?  @db.Timestamptz(6)
   sent_at     DateTime?  @db.Timestamptz(6)
   paid_at     DateTime?  @db.Timestamptz(6)
-  storagePath String   @unique
-  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+  storagePath   String    @unique
+  origin        String    @default("manual")
+  downloaded_at DateTime? @db.Timestamptz(6)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
   clients     clients    @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   templates   templatesInvoice? @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   businesses  businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
@@ -143,9 +145,9 @@ model businesses {
   templatesOffer    templatesOffer[]
   offers        offers[]
   gmail_oauth_connections gmail_oauth_connections[]
-  tasks         tasks[]
+  tasks                   tasks[]
 
-
+  @@index([phone])
   @@schema("public")
 }
 
@@ -185,3 +187,4 @@ model tasks {
   @@index([tenant_id, due_at])
   @@schema("public")
 }
+

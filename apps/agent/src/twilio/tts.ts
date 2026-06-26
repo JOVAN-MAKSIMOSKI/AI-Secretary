@@ -26,10 +26,12 @@ export async function generateSpeech(text: string): Promise<Buffer> {
   const modelId = process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL_ID;
   const client = new ElevenLabsClient({ apiKey });
 
+  // ulaw_8000 is Twilio's native telephony format: no transcoding on Twilio's side
+  // and ~half the bytes of mp3_44100_128, which lowers <Play> fetch+playback latency.
   const stream = await client.textToSpeech.convert(voiceId, {
     text,
     model_id: modelId,
-    output_format: 'mp3_44100_128',
+    output_format: 'ulaw_8000',
   });
 
   return readableToBuffer(stream as Readable);

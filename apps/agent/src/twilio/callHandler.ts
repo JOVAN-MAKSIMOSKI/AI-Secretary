@@ -34,21 +34,24 @@ import { decryptTwilioRecording, type TwilioEncryptionDetails } from './encrypti
 const PY_SERVICE_URL = process.env.PY_SERVICE_URL || 'http://127.0.0.1:8000';
 const CONFIDENCE_THRESHOLD = 0.7;
 const MAX_VOICE_TOKENS = 150;
+// PostgreSQL int4 upper bound. The LLM can extract out-of-range integers (e.g. a long
+// spoken number) for order_number/units; values above this overflow the DB column.
+const PG_INT4_MAX = 2147483647;
 
-const VOICE_GREETING = "Здраво, јас сум вашиот AI секретар. Со што можам да ви помогнам?";
-const VOICE_WAIT = "Ве молам почекајте додека го обработувам вашето барање.";
-const VOICE_RETRY = "Извинете, не ве разбрав. Можете ли да го повторите?";
-const VOICE_CANCEL = "Разбрав, барањето е откажано. Со што уште можам да ви помогнам?";
-const VOICE_ERROR = "Настана грешка. Ве молам обидете се повторно.";
+const VOICE_GREETING = "Hello, I am your AI secretary. How can I help you?";
+const VOICE_WAIT = "Please wait while I process your request.";
+const VOICE_RETRY = "Sorry, I didn't catch that. Could you please repeat it?";
+const VOICE_CANCEL = "Understood, the request has been cancelled. What else can I help you with?";
+const VOICE_ERROR = "An error occurred. Please try again.";
 const VOICE_SYSTEM_PROMPT =
-  'You are a voice secretary assistant speaking Macedonian. Respond in 1-2 short sentences ' +
+  'You are a voice secretary assistant speaking English. Respond in 1-2 short sentences ' +
   'with no markdown, no lists, and no special characters. Your response will be spoken aloud ' +
   'over a phone call. Keep it concise and natural.';
 
 const CHAIN_DESCRIPTIONS: Record<ChainId, string> = {
-  invoice_extraction: 'подготви фактура',
-  offer_extraction: 'подготви понуда',
-  calendar_event_extraction: 'закажи состанок во календарот',
+  invoice_extraction: 'prepare an invoice',
+  offer_extraction: 'prepare an offer',
+  calendar_event_extraction: 'schedule a meeting in the calendar',
 };
 
 const YES_PATTERNS = /^(да|yes|потврди|точно|јас|ok|okay)\b/i;
@@ -65,6 +68,14 @@ const calendarExtractionSchema = z
 
 // --- Helpers ---
 
+// Coerces an LLM-extracted value to a positive integer within the PG int4 range,
+// falling back when it is missing, non-integer, or out of range.
+function safePositiveInt(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= PG_INT4_MAX
+    ? value
+    : fallback;
+}
+
 function xmlEscape(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -76,7 +87,7 @@ function twiml(content: string): string {
 function buildRecordVerb(): string {
   const keySid = process.env.TWILIO_RECORDING_KEY_SID;
   const encryptionAttr = keySid ? ` recordingEncryptionKeySid="${keySid}"` : '';
-  return `<Record action="/calls/recording" method="POST" timeout="5" maxLength="30" playBeep="false" trim="trim-silence"${encryptionAttr}/>`;
+  return `<Record action="/calls/recording" method="POST" timeout="2" maxLength="30" playBeep="false" trim="trim-silence"${encryptionAttr}/>`;
 }
 
 function buildPlayVerb(audioId: string): string {
@@ -95,6 +106,23 @@ async function generateAndCacheSpeech(text: string): Promise<string> {
 async function lookupTenantByPhone(phoneNumber: string): Promise<string | null> {
   const business = await prisma.businesses.findFirst({
     where: { phone: phoneNumber },
+    select: { owner_auth_id: true },
+  });
+  return business?.owner_auth_id ?? null;
+}
+
+// Resolves tenant for WebRTC (browser) callers. Identity 'dev' uses TWILIO_DEV_TENANT_ID
+// or falls back to the first business in the DB. Any other identity is treated as an
+// owner_auth_id directly (production path).
+async function resolveWebRtcTenant(identity: string): Promise<string | null> {
+  if (identity === 'dev') {
+    const devTenantId = process.env.TWILIO_DEV_TENANT_ID;
+    if (devTenantId) return devTenantId;
+    const business = await prisma.businesses.findFirst({ select: { owner_auth_id: true } });
+    return business?.owner_auth_id ?? null;
+  }
+  const business = await prisma.businesses.findFirst({
+    where: { owner_auth_id: identity },
     select: { owner_auth_id: true },
   });
   return business?.owner_auth_id ?? null;
@@ -130,11 +158,11 @@ async function callPythonExtraction(
 
 // Builds a confirmation prompt from the pending chain description.
 function buildConfirmationText(description: string): string {
-  return `Разбрав дека сакате да ${description}. Кажете да за потврда, или не за откажување.`;
+  return `I understood that you want to ${description}. Say yes to confirm, or no to cancel.`;
 }
 
 // Executes the resolved chain after user confirmation.
-// Returns a voice-friendly Macedonian result message.
+// Returns a voice-friendly result message.
 async function executeChain(
   chainId: ChainId,
   transcript: string,
@@ -145,13 +173,83 @@ async function executeChain(
 
   switch (chainId) {
     case 'invoice_extraction': {
-      await callPythonExtraction('/documents/extract', transcript, tenantId);
-      return 'Фактурата е подготвена. Можете да ја видите во вашиот панел.';
+      try {
+        // Step 1: extract fields from transcript (resolves client_id, prices, etc.)
+        const extractionResult = await callPythonExtraction('/documents/extract', transcript, tenantId);
+        const extracted = (extractionResult.extracted ?? {}) as Record<string, unknown>;
+
+        const clientId = extracted.client_id as string | undefined;
+        const clientName = extracted.client_name as string | undefined;
+        const clientTaxNumber = (extracted.client_tax_number as string | undefined) ?? '';
+
+        if (!clientId || !clientName) {
+          return "I couldn't identify the client. Please make sure the client name is clear.";
+        }
+
+        // Step 2: auto-generate invoice_number from existing invoice count for this tenant
+        const invoiceCount = await prisma.invoices.count({ where: { tenant_id: tenantId } });
+        const nextNum = invoiceCount + 1;
+        const invoiceNumber = `${String(nextNum).padStart(3, '0')}/${new Date().getFullYear()}`;
+
+        const today = new Date().toISOString().split('T')[0];
+        const rawValueDate = (extracted.value_date as string | undefined)?.slice(0, 10) ?? '';
+        const valueDate = /^\d{4}-\d{2}-\d{2}$/.test(rawValueDate) ? rawValueDate : today;
+        const invoiceType = (extracted.invoice_type as string | undefined) === 'transport' ? 'transport' : 'goods';
+        const orderNumber = safePositiveInt(extracted.order_number, nextNum);
+
+        const invoicePayload = {
+          client_id: clientId,
+          invoice_number: invoiceNumber,
+          invoice_type: invoiceType,
+          invoice_date: today,
+          value_date: valueDate,
+          order_number: orderNumber,
+          client_name: clientName,
+          client_tax_number: clientTaxNumber,
+          description: (extracted.description as string | undefined) ?? 'Services',
+          units: safePositiveInt(extracted.units, 1),
+          price_per_unit: extracted.price_per_unit ?? 0,
+          price_before_tax: extracted.price_before_tax ?? 0,
+          price_after_tax: extracted.price_after_tax ?? 0,
+        };
+
+        // Step 3: generate and store the invoice (response is an XLSX stream — status check only)
+        const secret = process.env.INTER_SERVICE_SECRET;
+        if (!secret) throw new Error('INTER_SERVICE_SECRET is not configured.');
+
+        const genResponse = await fetch(`${PY_SERVICE_URL}/documents/invoice`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Service-Secret': secret,
+            'X-Tenant-Id': tenantId,
+            'X-Invoice-Origin': 'call',
+          },
+          body: JSON.stringify(invoicePayload),
+        });
+
+        if (!genResponse.ok) {
+          const errText = await genResponse.text().catch(() => '');
+          logger.error({ status: genResponse.status, body: errText }, 'Invoice generation endpoint failed');
+          return "I couldn't generate the invoice. Please check that all details are correct.";
+        }
+
+        // Drain the XLSX response body so the connection is released cleanly
+        await genResponse.arrayBuffer();
+
+        return 'Invoice generated successfully.';
+      } catch (err) {
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Invoice generation from voice failed',
+        );
+        return "I couldn't generate the invoice. Please make sure the client name and details are clear.";
+      }
     }
 
     case 'offer_extraction': {
       await callPythonExtraction('/documents/extract-offer', transcript, tenantId);
-      return 'Понудата е подготвена. Можете да ја видите во вашиот панел.';
+      return 'The offer has been prepared. You can view it in your panel.';
     }
 
     case 'calendar_event_extraction': {
@@ -160,37 +258,37 @@ async function executeChain(
       const parsed = calendarExtractionSchema.safeParse(extracted);
 
       if (!parsed.success) {
-        return 'Не можев да извлечам детали за состанокот. Ве молам наведете го датумот и времето.';
+        return "I couldn't extract the meeting details. Please provide the date and time.";
       }
 
       const { event_name, event_date, event_time, duration_minutes } = parsed.data;
       const startTime = `${event_date}T${event_time}:00`;
-      const endMs = new Date(startTime).getTime() + duration_minutes * 60_000;
-      const endTime = new Date(endMs).toISOString().replace(/\.\d{3}Z$/, '');
 
       try {
+        // Pass only startTime + duration; createCalendarEvent derives endTime in the
+        // same timezone basis. Pre-computing endTime here caused an off-by-offset bug
+        // where end landed before start and Google rejected the insert.
         await createCalendarEvent(tenantId, userAuthId, {
           title: event_name,
           startTime,
-          endTime,
           durationMinutes: duration_minutes,
         });
-        return `Состанокот "${event_name}" е закажан за ${event_date} во ${event_time}.`;
+        return `The meeting "${event_name}" is scheduled for ${event_date} at ${event_time}.`;
       } catch (err) {
-        logger.error({ err }, 'Calendar event creation failed');
-        return 'Не можев да го закажам состанокот. Проверете дали Google Calendar е поврзан.';
+        logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Calendar event creation failed');
+        return "I couldn't schedule the meeting. Please check that Google Calendar is connected.";
       }
     }
 
     default:
-      return 'Акцијата е непозната. Ве молам обидете се повторно.';
+      return 'The action is unknown. Please try again.';
   }
 }
 
 // Generates a short conversational reply using Claude Haiku for non-command requests.
 async function generateConversationalReply(state: CallState): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return 'Се извинувам, не можам да одговорам во моментов.';
+  if (!apiKey) return "I'm sorry, I can't respond right now.";
 
   try {
     const anthropic = new Anthropic({ apiKey });
@@ -216,15 +314,19 @@ export async function handleVoiceEntry(req: Request, res: Response): Promise<voi
 
   if (!callerPhone) {
     logger.warn({ callSid }, 'Twilio call arrived with no From number');
-    res.type('text/xml').send(twiml(`<Say language="mk-MK">Извинете, не можеме да ве идентификуваме. Довидување.</Say>`));
+    res.type('text/xml').send(twiml(`<Say language="en-US">Sorry, we could not identify you. Goodbye.</Say>`));
     return;
   }
 
-  const tenantId = await lookupTenantByPhone(callerPhone).catch(() => null);
+  const isWebRtc = callerPhone.startsWith('client:');
+  const tenantId = isWebRtc
+    ? await resolveWebRtcTenant(callerPhone.slice('client:'.length)).catch(() => null)
+    : await lookupTenantByPhone(callerPhone).catch(() => null);
+
   if (!tenantId) {
-    logger.warn({ callSid, callerPhone }, 'Twilio call from unregistered number');
-    const errorId = await generateAndCacheSpeech('Извинете, вашиот број не е регистриран. Довидување.').catch(() => null);
-    const play = errorId ? buildPlayVerb(errorId) : `<Say language="mk-MK">Извинете, вашиот број не е регистриран. Довидување.</Say>`;
+    logger.warn({ callSid, callerPhone }, isWebRtc ? 'WebRTC call with unknown identity' : 'Twilio call from unregistered number');
+    const errorId = await generateAndCacheSpeech('Sorry, your number is not registered. Goodbye.').catch(() => null);
+    const play = errorId ? buildPlayVerb(errorId) : `<Say language="en-US">Sorry, your number is not registered. Goodbye.</Say>`;
     res.type('text/xml').send(twiml(play));
     return;
   }
@@ -238,7 +340,7 @@ export async function handleVoiceEntry(req: Request, res: Response): Promise<voi
     logger.error({ err }, 'TTS greeting generation failed');
     res
       .type('text/xml')
-      .send(twiml(`<Say language="mk-MK">${xmlEscape(VOICE_GREETING)}</Say>` + buildRecordVerb()));
+      .send(twiml(`<Say language="en-US">${xmlEscape(VOICE_GREETING)}</Say>` + buildRecordVerb()));
   }
 }
 
@@ -280,7 +382,7 @@ export async function handleRecording(req: Request, res: Response): Promise<void
       .type('text/xml')
       .send(
         twiml(
-          `<Say language="mk-MK">${xmlEscape(VOICE_WAIT)}</Say>` +
+          `<Say language="en-US">${xmlEscape(VOICE_WAIT)}</Say>` +
             `<Redirect method="GET">${pollUrl}</Redirect>`,
         ),
       );
@@ -328,6 +430,8 @@ async function processRecording(
 
     const form = new FormData();
     form.append('audio', new Blob([new Uint8Array(audioBuffer)]), 'recording.wav');
+    // Temporary: English testing. Revert to 'mk' (or drop the field) for Macedonian.
+    form.append('language', 'en');
 
     const sttResponse = await fetch(`${PY_SERVICE_URL}/stt/transcribe`, {
       method: 'POST',
@@ -358,7 +462,7 @@ async function processRecording(
             state,
           );
           updateCallState(callSid, { pendingApproval: undefined });
-          responseText = `Готово. ${resultText} Со што уште можам да ви помогнам?`;
+          responseText = `Done. ${resultText} What else can I help you with?`;
         } else if (NO_PATTERNS.test(transcript)) {
           updateCallState(callSid, { pendingApproval: undefined });
           responseText = VOICE_CANCEL;
@@ -427,7 +531,7 @@ export function handleProcessingPoll(jobId: string, req: Request, res: Response)
   if (job.error && !job.audioId) {
     res
       .type('text/xml')
-      .send(twiml(`<Say language="mk-MK">${xmlEscape(job.error)}</Say>` + buildRecordVerb()));
+      .send(twiml(`<Say language="en-US">${xmlEscape(job.error)}</Say>` + buildRecordVerb()));
     return;
   }
 
@@ -446,7 +550,8 @@ export function serveAudio(audioId: string, res: Response): void {
     return;
   }
   audioCache.delete(audioId);
-  res.setHeader('Content-Type', 'audio/mpeg');
+  // ElevenLabs returns raw 8kHz mu-law (ulaw_8000); Twilio <Play> expects audio/ulaw for it.
+  res.setHeader('Content-Type', 'audio/ulaw');
   res.setHeader('Content-Length', buffer.length);
   res.send(buffer);
 }
