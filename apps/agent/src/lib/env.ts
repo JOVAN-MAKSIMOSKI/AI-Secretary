@@ -37,7 +37,7 @@ const agentEnvSchema = z
     TWILIO_RECORDING_KEY_SID: z.string().startsWith('CR').optional(),
     ELEVENLABS_API_KEY: z.string().optional(),
     ELEVENLABS_VOICE_ID: z.string().optional(),
-    ELEVENLABS_MODEL_ID: z.string().default('eleven_multilingual_v2'),
+    ELEVENLABS_MODEL_ID: z.string().default('eleven_flash_v2_5'),
     AGENT_PUBLIC_URL: z.string().url().optional(),
     TWILIO_API_KEY_SID: z.string().optional(),
     TWILIO_API_KEY_SECRET: z.string().optional(),

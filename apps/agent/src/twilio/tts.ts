@@ -5,7 +5,10 @@
 import { ElevenLabsClient } from 'elevenlabs';
 import type { Readable } from 'stream';
 
-const DEFAULT_MODEL_ID = 'eleven_multilingual_v2';
+// Flash v2.5 is ElevenLabs' low-latency model (~75ms generation latency) and is
+// multilingual (incl. Macedonian) — markedly faster than eleven_multilingual_v2 for
+// telephony. Override with ELEVENLABS_MODEL_ID if higher voice fidelity is needed.
+const DEFAULT_MODEL_ID = 'eleven_flash_v2_5';
 
 async function readableToBuffer(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = [];

@@ -3,6 +3,7 @@
 import logging
 import os
 import tempfile
+import time
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from slowapi import Limiter
@@ -18,6 +19,13 @@ logger = logging.getLogger(__name__)
 
 _SAFE_AUDIO_SUFFIXES = {".webm", ".ogg", ".mp4", ".wav", ".flac", ".aac", ".mp3"}
 _AUDIO_MAX_BYTES = 25 * 1024 * 1024  # 25 MB
+
+# Lower beam width = faster decode. Default 5 favours accuracy (best for Macedonian);
+# set STT_BEAM_SIZE=1 (greedy) during English testing for a large speedup.
+try:
+    _BEAM_SIZE = max(1, int(os.getenv("STT_BEAM_SIZE", "5")))
+except ValueError:
+    _BEAM_SIZE = 5
 
 
 @router.post("/transcribe", response_model=TranscribeResponse)
@@ -49,13 +57,25 @@ async def transcribe(
             tmp.write(content)
             tmp_path = tmp.name
 
+        transcribe_start = time.monotonic()
         segments, info = model.transcribe(
             tmp_path,
             language=language,  # Caller-supplied; defaults to Macedonian
-            beam_size=5,
-            vad_filter=True,    # Strip silence before transcribing
+            beam_size=_BEAM_SIZE,
+            vad_filter=True,                 # Strip silence before transcribing
+            condition_on_previous_text=False,  # Faster; avoids hallucination loops on short clips
         )
         text = " ".join(segment.text for segment in segments)
+        # segments is a lazy generator — decode wall time is only known after it is drained.
+        transcribe_ms = int((time.monotonic() - transcribe_start) * 1000)
+        logger.info(
+            "STT transcribe done lang=%s audio_s=%.2f wall_ms=%d rtf=%.2f beam=%d",
+            info.language,
+            info.duration,
+            transcribe_ms,
+            (transcribe_ms / 1000) / info.duration if info.duration else 0,
+            _BEAM_SIZE,
+        )
         return TranscribeResponse(
             text=text.strip(),
             language=info.language,

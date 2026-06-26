@@ -34,6 +34,12 @@ import { decryptTwilioRecording, type TwilioEncryptionDetails } from './encrypti
 const PY_SERVICE_URL = process.env.PY_SERVICE_URL || 'http://127.0.0.1:8000';
 const CONFIDENCE_THRESHOLD = 0.7;
 const MAX_VOICE_TOKENS = 150;
+// Twilio <Pause> minimum is 1s. Caller waits up to this long between the background job
+// finishing and the result being played, so keep it tight.
+const POLL_PAUSE_SECONDS = 1;
+// Bound the two slowest network hops so one stalled dependency never hangs a whole turn.
+const RECORDING_DOWNLOAD_TIMEOUT_MS = 10_000;
+const STT_TIMEOUT_MS = 30_000;
 // PostgreSQL int4 upper bound. The LLM can extract out-of-range integers (e.g. a long
 // spoken number) for order_number/units; values above this overflow the DB column.
 const PG_INT4_MAX = 2147483647;
@@ -186,9 +192,15 @@ async function executeChain(
           return "I couldn't identify the client. Please make sure the client name is clear.";
         }
 
-        // Step 2: auto-generate invoice_number from existing invoice count for this tenant
-        const invoiceCount = await prisma.invoices.count({ where: { tenant_id: tenantId } });
-        const nextNum = invoiceCount + 1;
+        // Step 2: generate invoice_number from the business invoice_counter — the same
+        // canonical source the web path and Python use. Using invoices.count()+1 here
+        // collided with existing numbers (e.g. count 8 → "009" when 009 already existed),
+        // which made Python UPDATE an old invoice instead of inserting a new one, so the
+        // call invoice never reached the dashboard card.
+        const counterRows = await prisma.$queryRaw<Array<{ invoice_counter: number | null }>>`
+          SELECT invoice_counter FROM businesses WHERE owner_auth_id = ${tenantId}::uuid LIMIT 1
+        `;
+        const nextNum = Number(counterRows[0]?.invoice_counter ?? 0) + 1;
         const invoiceNumber = `${String(nextNum).padStart(3, '0')}/${new Date().getFullYear()}`;
 
         const today = new Date().toISOString().split('T')[0];
@@ -405,14 +417,23 @@ async function processRecording(
   const state = getOrCreateCallState(callSid, tenantId);
   let responseText: string;
 
+  // Per-stage timings so the latency breakdown is measured, not guessed.
+  const turnStart = Date.now();
+  let downloadMs = 0;
+  let sttMs = 0;
+  let resolveMs = 0;
+  let ttsMs = 0;
+
   try {
     // 1. Download Twilio recording (WAV) using BasicAuth.
+    const downloadStart = Date.now();
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const audioResponse = await fetch(recordingUrl, {
       headers: accountSid && authToken
         ? { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}` }
         : {},
+      signal: AbortSignal.timeout(RECORDING_DOWNLOAD_TIMEOUT_MS),
     });
 
     if (!audioResponse.ok) {
@@ -423,6 +444,7 @@ async function processRecording(
     const audioBuffer = encryptionDetails
       ? decryptTwilioRecording(rawBuffer, encryptionDetails)
       : rawBuffer;
+    downloadMs = Date.now() - downloadStart;
 
     // 2. Transcribe via Python STT.
     const secret = process.env.INTER_SERVICE_SECRET;
@@ -433,10 +455,12 @@ async function processRecording(
     // Temporary: English testing. Revert to 'mk' (or drop the field) for Macedonian.
     form.append('language', 'en');
 
+    const sttStart = Date.now();
     const sttResponse = await fetch(`${PY_SERVICE_URL}/stt/transcribe`, {
       method: 'POST',
       headers: { 'X-Service-Secret': secret },
       body: form,
+      signal: AbortSignal.timeout(STT_TIMEOUT_MS),
     });
 
     if (!sttResponse.ok) {
@@ -444,6 +468,7 @@ async function processRecording(
     }
 
     const sttResult = (await sttResponse.json()) as { text?: string };
+    sttMs = Date.now() - sttStart;
     const transcript = (sttResult.text || '').trim();
 
     if (!transcript) {
@@ -471,7 +496,9 @@ async function processRecording(
         }
       } else {
         // 4. Resolve intent with LLM resolver.
+        const resolveStart = Date.now();
         const decision = await resolveChainWithLlm(transcript, getChainRegistry());
+        resolveMs = Date.now() - resolveStart;
 
         if (decision.confidence >= CONFIDENCE_THRESHOLD) {
           const description = CHAIN_DESCRIPTIONS[decision.chainId] ?? decision.chainId;
@@ -495,17 +522,28 @@ async function processRecording(
     }
   } catch (err) {
     logger.error({ err }, 'processRecording error');
-    responseText = VOICE_ERROR;
+    // A stalled download/STT aborts via AbortSignal.timeout — ask the caller to repeat
+    // rather than surfacing a hard error for what is usually a transient slowdown.
+    const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    responseText = isTimeout ? VOICE_RETRY : VOICE_ERROR;
   }
 
   // 5. Generate TTS and mark job done.
   try {
+    const ttsStart = Date.now();
     const audioId = await generateAndCacheSpeech(responseText);
+    ttsMs = Date.now() - ttsStart;
     processingJobs.set(jobId, { done: true, audioId });
   } catch (err) {
     logger.error({ err }, 'TTS response generation failed');
     processingJobs.set(jobId, { done: true, error: responseText });
   }
+
+  // One line per turn with the full latency breakdown so the slowest stage is visible.
+  logger.info(
+    { callSid, downloadMs, sttMs, resolveMs, ttsMs, totalMs: Date.now() - turnStart },
+    'voice turn timing',
+  );
 }
 
 export function handleProcessingPoll(jobId: string, req: Request, res: Response): void {
@@ -522,7 +560,7 @@ export function handleProcessingPoll(jobId: string, req: Request, res: Response)
     const selfUrl = xmlEscape(
       `${publicUrl}/calls/processing/${jobId}?CallSid=${encodeURIComponent(callSid)}`,
     );
-    res.type('text/xml').send(twiml(`<Pause length="2"/><Redirect method="GET">${selfUrl}</Redirect>`));
+    res.type('text/xml').send(twiml(`<Pause length="${POLL_PAUSE_SECONDS}"/><Redirect method="GET">${selfUrl}</Redirect>`));
     return;
   }
 
