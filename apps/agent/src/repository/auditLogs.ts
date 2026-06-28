@@ -1,6 +1,6 @@
-// Audit log repository — fire-and-forget writes to the auditLogs Supabase table.
+// Audit log repository — fire-and-forget writes to the audit_logs Supabase table.
 // Failures are logged but never propagate to callers so audit issues cannot break
-// the primary request path. The auditLogs table must exist in Supabase with columns:
+// the primary request path. The audit_logs table must exist in Supabase with columns:
 // tenant_id, user_auth_id, action_type, meta (jsonb), created_at.
 
 import { supabase } from '../lib/supabase.js';
@@ -24,7 +24,7 @@ export async function writeAuditLog(entry: {
   meta?: Record<string, unknown>;
 }): Promise<void> {
   try {
-    const { error } = await supabase.from('auditLogs').insert({
+    const { error } = await supabase.from('audit_logs').insert({
       tenant_id: entry.tenantId,
       user_auth_id: entry.userAuthId,
       action_type: entry.action,
