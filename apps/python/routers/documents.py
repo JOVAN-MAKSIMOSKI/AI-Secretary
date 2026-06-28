@@ -262,6 +262,9 @@ def create_invoice(
         )
     resolved_owner_auth_id = business.data[0]["owner_auth_id"]
     rendered_template_bytes: bytes | None = None
+    # Tracks whether this request inserted a brand-new invoice row (vs. updating an
+    # existing one). Only a row we created here may be rolled back on upload failure.
+    inserted_new_invoice = False
 
     if payload is not None:
         client_result = (
@@ -364,6 +367,7 @@ def create_invoice(
             }
             _insert_invoice_with_schema_fallback(insert_data)
             _increment_business_invoice_counter(resolved_owner_auth_id)
+            inserted_new_invoice = True
 
         business_values = fetch_business_values(resolved_owner_auth_id)
         invoice_render_values = {
@@ -411,7 +415,35 @@ def create_invoice(
         )
         try:
             upload_invoice_document(resolved_owner_auth_id, invoice_id, rendered_template_bytes)
-        except Exception:
+        except Exception as exc:
+            # Twilio voice invoices are only persisted in the cloud — there is no browser
+            # download to fall back on, so a failed upload must surface loudly instead of
+            # silently leaving the DB row pointing at a missing file. Manual (web) invoices
+            # still stream the file back, so a best-effort upload is acceptable there.
+            if x_invoice_origin == "call":
+                logger.exception("Storage upload failed for voice invoice %s", invoice_id)
+                # Delete the row we just inserted so it cannot linger as a "ghost" invoice
+                # pointing at a file that was never stored. We deliberately do NOT decrement
+                # the business invoice counter — leaving a gap in numbering is harmless, while
+                # rolling it back could collide with a concurrent invoice's number.
+                if inserted_new_invoice:
+                    try:
+                        (
+                            supabase.table("invoices")
+                            .delete()
+                            .eq("id", invoice_id)
+                            .eq("tenant_id", resolved_owner_auth_id)
+                            .execute()
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to roll back ghost invoice row %s after upload failure",
+                            invoice_id,
+                        )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Invoice {invoice_id} was generated but could not be saved to storage.",
+                ) from exc
             logger.exception("Storage upload failed for invoice %s — continuing with stream", invoice_id)
 
     filename = f"{template_payload['template_name']}.xlsx"

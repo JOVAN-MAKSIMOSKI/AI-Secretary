@@ -202,6 +202,12 @@ def _coerce_extracted_value(key: str, value: Any) -> Any:
     return value
 
 
+# Extraction is a deterministic, structured task: the same message must always yield
+# the same fields. A non-zero temperature made the model randomly omit fields like
+# units / price_per_unit between identical requests. Keep it at 0 for reproducibility.
+_EXTRACTION_TEMPERATURE = 0.0
+
+
 def get_ollama_llm():
     """Initialize and return an Ollama LLM."""
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -210,7 +216,7 @@ def get_ollama_llm():
     return Ollama(
         base_url=ollama_base_url,
         model=model,
-        temperature=0.7,
+        temperature=_EXTRACTION_TEMPERATURE,
     )
 
 
