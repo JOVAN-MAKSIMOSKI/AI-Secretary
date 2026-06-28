@@ -47,21 +47,21 @@ const PG_INT4_MAX = 2147483647;
 const VOICE_GREETING = "Hello, I am your AI secretary. How can I help you?";
 const VOICE_WAIT = "Please wait while I process your request.";
 const VOICE_RETRY = "Sorry, I didn't catch that. Could you please repeat it?";
-const VOICE_CANCEL = "Understood, the request has been cancelled. What else can I help you with?";
+// const VOICE_CANCEL = "Understood, the request has been cancelled. What else can I help you with?";
 const VOICE_ERROR = "An error occurred. Please try again.";
 const VOICE_SYSTEM_PROMPT =
   'You are a voice secretary assistant speaking English. Respond in 1-2 short sentences ' +
   'with no markdown, no lists, and no special characters. Your response will be spoken aloud ' +
   'over a phone call. Keep it concise and natural.';
 
-const CHAIN_DESCRIPTIONS: Record<ChainId, string> = {
-  invoice_extraction: 'prepare an invoice',
-  offer_extraction: 'prepare an offer',
-  calendar_event_extraction: 'schedule a meeting in the calendar',
-};
+// const CHAIN_DESCRIPTIONS: Record<ChainId, string> = {
+//   invoice_extraction: 'prepare an invoice',
+//   offer_extraction: 'prepare an offer',
+//   calendar_event_extraction: 'schedule a meeting in the calendar',
+// };
 
-const YES_PATTERNS = /^(да|yes|потврди|точно|јас|ok|okay)\b/i;
-const NO_PATTERNS = /^(не|no|откажи|cancel|стоп|stop)\b/i;
+// const YES_PATTERNS = /^(да|yes|потврди|точно|јас|ok|okay)\b/i;
+// const NO_PATTERNS = /^(не|no|откажи|cancel|стоп|stop)\b/i;
 
 const calendarExtractionSchema = z
   .object({
@@ -163,9 +163,9 @@ async function callPythonExtraction(
 }
 
 // Builds a confirmation prompt from the pending chain description.
-function buildConfirmationText(description: string): string {
-  return `I understood that you want to ${description}. Say yes to confirm, or no to cancel.`;
-}
+// function buildConfirmationText(description: string): string {
+//   return `I understood that you want to ${description}. Say yes to confirm, or no to cancel.`;
+// }
 
 // Executes the resolved chain after user confirmation.
 // Returns a voice-friendly result message.
@@ -173,16 +173,20 @@ async function executeChain(
   chainId: ChainId,
   transcript: string,
   tenantId: string,
-  _state: CallState,
+  state: CallState,
 ): Promise<string> {
   const userAuthId = tenantId; // owner_auth_id === tenantId in this single-owner schema
 
   switch (chainId) {
     case 'invoice_extraction': {
       try {
-        // Step 1: extract fields from transcript (resolves client_id, prices, etc.)
-        const extractionResult = await callPythonExtraction('/documents/extract', transcript, tenantId);
-        const extracted = (extractionResult.extracted ?? {}) as Record<string, unknown>;
+        // Step 1: use the eagerly-started extraction from turn 1 if available,
+        // otherwise fall back to extracting now (e.g. if called without prior approval state).
+        const extractionStart = Date.now();
+        const extracted: Record<string, unknown> = state.pendingApproval?.extractionPromise
+          ? await state.pendingApproval.extractionPromise
+          : ((await callPythonExtraction('/documents/extract', transcript, tenantId)).extracted ?? {}) as Record<string, unknown>;
+        const extractionMs = Date.now() - extractionStart;
 
         const clientId = extracted.client_id as string | undefined;
         const clientName = extracted.client_name as string | undefined;
@@ -197,9 +201,11 @@ async function executeChain(
         // collided with existing numbers (e.g. count 8 → "009" when 009 already existed),
         // which made Python UPDATE an old invoice instead of inserting a new one, so the
         // call invoice never reached the dashboard card.
+        const counterStart = Date.now();
         const counterRows = await prisma.$queryRaw<Array<{ invoice_counter: number | null }>>`
           SELECT invoice_counter FROM businesses WHERE owner_auth_id = ${tenantId}::uuid LIMIT 1
         `;
+        const counterMs = Date.now() - counterStart;
         const nextNum = Number(counterRows[0]?.invoice_counter ?? 0) + 1;
         const invoiceNumber = `${String(nextNum).padStart(3, '0')}/${new Date().getFullYear()}`;
 
@@ -229,6 +235,7 @@ async function executeChain(
         const secret = process.env.INTER_SERVICE_SECRET;
         if (!secret) throw new Error('INTER_SERVICE_SECRET is not configured.');
 
+        const invoiceGenStart = Date.now();
         const genResponse = await fetch(`${PY_SERVICE_URL}/documents/invoice`, {
           method: 'POST',
           headers: {
@@ -248,6 +255,12 @@ async function executeChain(
 
         // Drain the XLSX response body so the connection is released cleanly
         await genResponse.arrayBuffer();
+        const invoiceGenMs = Date.now() - invoiceGenStart;
+
+        logger.info(
+          { extractionMs, counterMs, invoiceGenMs },
+          'executeChain invoice timing',
+        );
 
         return 'Invoice generated successfully.';
       } catch (err) {
@@ -477,43 +490,17 @@ async function processRecording(
       // Append user turn to conversation history.
       state.conversationHistory.push({ role: 'user', content: transcript });
 
-      // 3. Check if there is a pending approval awaiting yes/no.
-      if (state.pendingApproval) {
-        if (YES_PATTERNS.test(transcript)) {
-          const resultText = await executeChain(
-            state.pendingApproval.chainId as ChainId,
-            state.pendingApproval.originalTranscript,
-            tenantId,
-            state,
-          );
-          updateCallState(callSid, { pendingApproval: undefined });
-          responseText = `Done. ${resultText} What else can I help you with?`;
-        } else if (NO_PATTERNS.test(transcript)) {
-          updateCallState(callSid, { pendingApproval: undefined });
-          responseText = VOICE_CANCEL;
-        } else {
-          responseText = buildConfirmationText(state.pendingApproval.description);
-        }
-      } else {
-        // 4. Resolve intent with LLM resolver.
-        const resolveStart = Date.now();
-        const decision = await resolveChainWithLlm(transcript, getChainRegistry());
-        resolveMs = Date.now() - resolveStart;
+      // 3. Resolve intent with LLM resolver and execute directly (no confirmation step).
+      const resolveStart = Date.now();
+      const decision = await resolveChainWithLlm(transcript, getChainRegistry());
+      resolveMs = Date.now() - resolveStart;
 
-        if (decision.confidence >= CONFIDENCE_THRESHOLD) {
-          const description = CHAIN_DESCRIPTIONS[decision.chainId] ?? decision.chainId;
-          updateCallState(callSid, {
-            pendingApproval: {
-              originalTranscript: transcript,
-              chainId: decision.chainId,
-              description,
-            },
-          });
-          responseText = buildConfirmationText(description);
-        } else {
-          // Low confidence — handle as general conversation.
-          responseText = await generateConversationalReply(state);
-        }
+      if (decision.confidence >= CONFIDENCE_THRESHOLD) {
+        const resultText = await executeChain(decision.chainId, transcript, tenantId, state);
+        responseText = `${resultText} What else can I help you with?`;
+      } else {
+        // Low confidence — handle as general conversation.
+        responseText = await generateConversationalReply(state);
       }
 
       // Append assistant turn.

@@ -4,6 +4,8 @@ export interface PendingApproval {
   originalTranscript: string;
   chainId: string;
   description: string;
+  // Eagerly-started extraction result to avoid re-running the LLM chain on confirmation.
+  extractionPromise?: Promise<Record<string, unknown>>;
 }
 
 export interface ProcessingJob {
