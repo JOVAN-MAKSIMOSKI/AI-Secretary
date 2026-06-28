@@ -1,3 +1,5 @@
+test for the invopice generation, measure if it is 1.20>=
+ask claude how would the latency be if we executed the plan fully
 order number isnt interpreted correctly
 latency needs major improvements!
 make the secreatry calls bitolski
