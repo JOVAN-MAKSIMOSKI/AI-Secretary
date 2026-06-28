@@ -145,7 +145,7 @@ ElevenLabs vars required only when that provider is selected.
 ### Environment variables (new)
 
 `apps/python/.env`:
-```
+``
 AZURE_TTS_KEY=
 AZURE_TTS_REGION=
 AZURE_TTS_VOICE=mk-MK-MarijaNeural

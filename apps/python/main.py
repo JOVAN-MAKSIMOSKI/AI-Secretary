@@ -35,6 +35,7 @@ from routers.clients import router as clients_router
 from routers.documents import router as documents_router
 from routers.rag import router as rag_router
 from routers.stt import router as stt_router
+from routers.tts import router as tts_router
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -59,3 +60,4 @@ app.include_router(clients_router)
 app.include_router(documents_router)
 app.include_router(rag_router)
 app.include_router(stt_router)
+app.include_router(tts_router)

@@ -43,11 +43,19 @@ const agentEnvSchema = z
     TWILIO_API_KEY_SECRET: z.string().optional(),
     TWILIO_TWIML_APP_SID: z.string().startsWith('AP').optional(),
     TWILIO_DEV_TENANT_ID: z.string().optional(),
+    VOICE_TTS_PROVIDER: z.enum(['elevenlabs', 'azure_rvc']).default('elevenlabs'),
   })
   .refine((env) => Boolean(env.GMAIL_OAUTH_STATE_SECRET || env.GOOGLE_OAUTH_STATE_SECRET), {
     message: 'GMAIL_OAUTH_STATE_SECRET (or GOOGLE_OAUTH_STATE_SECRET) is required',
     path: ['GMAIL_OAUTH_STATE_SECRET'],
-  });
+  })
+  .refine(
+    (env) => env.VOICE_TTS_PROVIDER !== 'azure_rvc' || Boolean(env.PY_SERVICE_URL),
+    {
+      message: 'PY_SERVICE_URL is required when VOICE_TTS_PROVIDER=azure_rvc',
+      path: ['PY_SERVICE_URL'],
+    },
+  );
 
 export type AgentEnv = z.infer<typeof agentEnvSchema>;
 
