@@ -138,6 +138,20 @@ export type DocumentTemplateResponse = {
   created_at: string;
 };
 
+// Waste-law advisor profile (businesses.tenantprofilecontext) — structured
+// selections that apps/agent formats into the RAG prompt as tenant context
+export type TenantWasteProfile = {
+  entity_type: "individual" | "small_business" | "large_company" | "municipality" | null;
+  business_sector: "construction" | "healthcare" | "automotive" | "retail" | "food" | "other" | null;
+  waste_types: Array<
+    "hazardous" | "construction" | "packaging" | "electronic" | "municipal" | "paper_textile" | "other"
+  >;
+  annual_volume: "under_200kg" | "200kg_5t" | "5t_plus" | null;
+  location: string | null;
+  has_permits: boolean;
+  permit_types: string[];
+};
+
 export type BusinessProfileResponse = {
   business_id: string;
   owner_auth_id: string;
@@ -150,6 +164,7 @@ export type BusinessProfileResponse = {
   address: string | null;
   logo_url: string | null;
   plan: string;
+  tenantprofilecontext: TenantWasteProfile | null;
   created_at: string | null;
 };
 
@@ -867,6 +882,46 @@ export async function createBusinessProfile(
 
   if (!response.ok) {
     let detail = "Failed to create business profile.";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        detail = data.detail;
+      }
+    } catch {
+      // Keep fallback error message when response body is not JSON.
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as BusinessProfileResponse;
+}
+
+// Partial update via the new PATCH /business/profile — currently used by the
+// settings page to store the waste-law advisor profile
+export async function updateBusinessProfile(
+  updates: Partial<{
+    name: string;
+    tax_number: string | null;
+    transaction_account: string | null;
+    depositor: string | null;
+    phone: string | null;
+    address: string | null;
+    logo_url: string | null;
+    tenantprofilecontext: TenantWasteProfile;
+  }>
+): Promise<BusinessProfileResponse> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/business/profile`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(updates),
+  });
+
+  if (!response.ok) {
+    let detail = "Failed to update business profile.";
     try {
       const data = (await response.json()) as { detail?: string };
       if (data?.detail) {

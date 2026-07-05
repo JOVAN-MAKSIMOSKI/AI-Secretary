@@ -138,6 +138,9 @@ model businesses {
   address       String?
   logo_url      String?
   plan          String     @default("free")
+  // Waste-law advisor profile (entity type, sector, waste types, volume…) —
+  // formatted into the RAG prompt as tenant context; null = not yet set up
+  tenantprofilecontext Json? @db.JsonB
   created_at    DateTime   @default(now()) @db.Timestamptz(6)
   clients       clients[]
   invoices      invoices[]

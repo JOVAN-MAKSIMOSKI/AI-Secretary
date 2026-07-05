@@ -7,6 +7,7 @@ import {
   type GmailConnectionStatusResponse,
 } from "../../connection/supabase-client";
 import { useAppContextStore, type SttMode } from "../../store/app-context";
+import WasteProfileSection from "../../components/portal/WasteProfileSection";
 
 type Banner = {
   tone: "success" | "error";
@@ -230,6 +231,9 @@ export default function Settings() {
           })}
         </div>
       </div>
+
+      {/* Waste-law advisor profile (feeds tenant context into RAG answers) */}
+      <WasteProfileSection />
     </section>
   );
 }
