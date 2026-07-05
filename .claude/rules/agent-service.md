@@ -240,14 +240,16 @@ The `/agent/resolve-and-run` endpoint calls `runDirectResolverChain()` and retur
 | Env var | Values | Behavior |
 |---|---|---|
 | `ROUTER_LLM_PROVIDER` | `anthropic`, `github`, `keyword`, `auto` | Selects routing backend |
-| `ROUTER_ALLOW_KEYWORD_FALLBACK` | `true`/`1` | Falls back to keyword matching if LLM fails |
+| `ROUTER_ALLOW_KEYWORD_FALLBACK` | `true`/`1` | Falls back to keyword matching if LLM fails — **policy: keep `false`**, see `guardrails.md` Router LLM Env Vars |
 | `ROUTER_LLM_MODEL` | model name | Overrides default model for either provider |
 | `ROUTER_GITHUB_MODELS_TOKEN` | token | Required for GitHub Models provider |
 | `ANTHROPIC_MODEL` | model name | Override for Anthropic routing model |
 
 **Auto mode priority:** GitHub Models token → Anthropic → keyword fallback (if allowed).
 
-Keyword fallback returns confidence `0.55` (keyword match) or `0.35` (no match).
+Keyword fallback returns confidence `0.55` (keyword match) or `0.35` (no match) — it is
+disabled by policy (`ROUTER_ALLOW_KEYWORD_FALLBACK=false`); the mechanics remain documented
+here only so the code path is understood.
 
 The resolver always returns a `ResolverDecision`:
 ```typescript

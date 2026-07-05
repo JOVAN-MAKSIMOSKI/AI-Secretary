@@ -1,5 +1,6 @@
 import { getChainRegistry, type ChainId } from './nodes/chainRegistry.js';
 import { resolveChainWithLlm } from './nodes/llmResolver.js';
+import { runWasteLawChain } from './wasteLawChain.js';
 import { z } from 'zod';
 
 import { createCalendarEvent } from '../mcp/calendar.js';
@@ -148,6 +149,21 @@ export async function runDirectResolverChain(input: {
                 : 'Failed to book meeting due to an unknown error.',
           };
         }
+      }
+      break;
+    case 'waste_law_query':
+      {
+        // History is intentionally empty on this path — the dashboard chat is
+        // stateless. The law questions page uses the dedicated
+        // POST /agent/waste-law/chat route, which passes its own history.
+        const wasteLawResult = await runWasteLawChain({
+          tenantId: input.tenantId,
+          userAuthId: input.userAuthId,
+          accessToken: input.accessToken,
+          message: input.message,
+          history: [],
+        });
+        handlerResult = { success: true, answer: wasteLawResult.answer };
       }
       break;
     default:

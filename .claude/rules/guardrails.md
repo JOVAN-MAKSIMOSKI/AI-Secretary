@@ -124,4 +124,9 @@ Every rule below serves one of these three.
 
 ## Router LLM Env Vars
 
-The LLM resolver reads several env vars. Never set `ROUTER_LLM_PROVIDER` to a value not in `['auto', 'anthropic', 'github', 'keyword']` — the resolver will silently default to `auto`. Always set `ROUTER_ALLOW_KEYWORD_FALLBACK=true` in development so the resolver degrades gracefully without API keys.
+The LLM resolver reads several env vars. The LLM is the only permitted resolver — routing decisions must never come from keyword matching:
+
+- `ROUTER_ALLOW_KEYWORD_FALLBACK=false` always (Phase 4 of the waste-law RAG plan). A resolver failure must surface as a hard error, never degrade to a silent keyword guess.
+- Never set `ROUTER_LLM_PROVIDER=keyword`.
+- Prefer `ROUTER_LLM_PROVIDER=anthropic` with `ANTHROPIC_API_KEY` set; `github` (GitHub Models) is the acceptable alternative while no Anthropic key is configured. Either way an LLM provider key must be present at startup so the LLM path is always available.
+- The `keywords[]` arrays in `chainRegistry.ts` are dead weight under this policy — LLM routing reads chain descriptions only. Leave them empty for new chains (e.g. `waste_law_query`).

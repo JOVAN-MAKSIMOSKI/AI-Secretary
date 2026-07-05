@@ -15,7 +15,8 @@ export type AuditAction =
   | 'task.delete'
   | 'gmail.connect'
   | 'gmail.disconnect'
-  | 'stt.transcribe';
+  | 'stt.transcribe'
+  | 'law.query';
 
 export async function writeAuditLog(entry: {
   tenantId: string;

@@ -31,7 +31,8 @@
     "nodemailer": "^8.0.7",
     "pg": "^8.16.3",
     "twilio": "^5.13.1",
-    "zod": "^3.24.0"
+    "zod": "^3.24.0",
+    "@secretary/shared-types": "workspace:*"
   },
   "devDependencies": {
     "@types/cors": "^2.8.0",

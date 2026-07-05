@@ -27,6 +27,7 @@ import {
 	GmailReconnectRequiredError,
 } from './lib/gmailOAuth.js';
 import { runDirectResolverChain } from './agent/directResolverChain.js';
+import { runWasteLawChain, type WasteLawChatMessage } from './agent/wasteLawChain.js';
 import { createCalendarEvent, deleteCalendarEvent, listCalendarEvents } from './mcp/calendar.js';
 import { getGmailInboxStats, getDocumentBuffer } from './mcp/gmail.js';
 import JSZip from 'jszip';
@@ -54,6 +55,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_TITLE_LENGTH = 500;
 const MAX_NOTES_LENGTH = 5_000;
 const MAX_MESSAGE_LENGTH = 10_000;
+const MAX_LAW_CHAT_HISTORY_MESSAGES = 50;
 const AUDIO_MAX_SIZE_BYTES = 25 * 1024 * 1024;
 const ALLOWED_AUDIO_MIMES = new Set([
 	'audio/webm',
@@ -738,6 +740,66 @@ app.post(
 			});
 		} catch (error) {
 			res.status(400).json({ error: toSafeError(error, 'Failed to resolve and execute chain.') });
+		}
+	},
+);
+
+// Waste-law advisor chat (waste-law RAG plan, Phase 5) — dedicated route so the
+// law questions page can pass its conversation history; tenant profile context
+// is resolved here from the JWT and injected into the Python /rag/chat call.
+app.post(
+	'/agent/waste-law/chat',
+	requireAuth,
+	agentLimiter,
+	async (req: AuthenticatedRequest, res: Response) => {
+		const userAuthId = req.userAuthId;
+		if (!userAuthId) {
+			res.status(401).json({ error: 'Missing authenticated user.' });
+			return;
+		}
+
+		const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+		if (!message) {
+			res.status(422).json({ error: 'message is required.' });
+			return;
+		}
+		if (message.length > MAX_MESSAGE_LENGTH) {
+			res.status(422).json({ error: `message must not exceed ${MAX_MESSAGE_LENGTH} characters.` });
+			return;
+		}
+
+		// History is untrusted client input — validate shape and cap size here;
+		// Python re-validates via LawChatRequest.
+		const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+		if (rawHistory.length > MAX_LAW_CHAT_HISTORY_MESSAGES) {
+			res.status(422).json({
+				error: `history must not exceed ${MAX_LAW_CHAT_HISTORY_MESSAGES} messages.`,
+			});
+			return;
+		}
+		const history: WasteLawChatMessage[] = [];
+		for (const item of rawHistory) {
+			const role = item?.role;
+			const content = typeof item?.content === 'string' ? item.content.trim() : '';
+			if ((role !== 'user' && role !== 'assistant') || !content) {
+				res.status(422).json({ error: 'history items must be { role: user|assistant, content: string }.' });
+				return;
+			}
+			history.push({ role, content: content.slice(0, MAX_MESSAGE_LENGTH) });
+		}
+
+		const accessToken = parseBearerToken(req);
+		if (!accessToken) {
+			res.status(401).json({ error: 'Missing bearer token.' });
+			return;
+		}
+
+		try {
+			const tenantId = await getTenantForUser(userAuthId);
+			const result = await runWasteLawChain({ tenantId, userAuthId, accessToken, message, history });
+			res.json({ answer: result.answer });
+		} catch (error) {
+			res.status(400).json({ error: toSafeError(error, 'Failed to answer waste-law question.') });
 		}
 	},
 );
