@@ -1,4 +1,4 @@
-"""RAG router — POST /rag/query."""
+"""RAG router — POST /rag/query (stateless) and POST /rag/chat (history + profile)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from models.rag import LawChatRequest, LawChatResponse
 from services.auth import get_current_user_id
 
 limiter = Limiter(key_func=get_remote_address)
@@ -66,3 +67,53 @@ async def rag_query(
         )
 
     return RagQueryResponse(answer=answer)
+
+
+@router.post("/chat", response_model=LawChatResponse)
+@limiter.limit("20/minute")
+async def rag_chat(
+    request: Request,
+    payload: LawChatRequest,
+    _current_user_id: str = Depends(get_current_user_id),
+) -> LawChatResponse:
+    """Waste-law advisor chat: conversation history + tenant profile context.
+
+    tenant_context arrives pre-formatted from apps/agent (which resolves the
+    tenant from the JWT and reads businesses.tenantprofilecontext) — this
+    service never reads the businesses table or raw auth data itself.
+    """
+    import asyncio
+
+    try:
+        from services.ragagent import chat_law_documents
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"RAG service unavailable (llama_index failed to load): {exc}",
+        )
+
+    history = [{"role": m.role, "content": m.content} for m in payload.history]
+
+    loop = asyncio.get_event_loop()
+    try:
+        answer = await loop.run_in_executor(
+            _executor,
+            lambda: chat_law_documents(
+                question=payload.question,
+                history=history,
+                tenant_context=payload.tenant_context,
+                similarity_top_k=payload.top_k,
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"RAG chat failed: {exc}",
+        )
+
+    return LawChatResponse(answer=answer)
