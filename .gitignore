@@ -7,6 +7,11 @@ apps/**/dist/
 # Qdrant local vector DB data
 **/qdrant_data/
 
+# Raw law corpus (large binaries) — regenerate the vector store via apps/python/scripts/ingest.py
+apps/agent/src/rag-agent/resources/*
+!apps/agent/src/rag-agent/resources/.gitkeep
+/resources/
+
 # Python
 backend/.venv/
 __pycache__/

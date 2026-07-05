@@ -18,13 +18,13 @@ def run_diagnostics(question: str, top_k: int = 5):
     print(f" -> RAG_LLM_PROVIDER:   {os.getenv('RAG_LLM_PROVIDER', 'auto (default)')}")
     print(f" -> RAG_EMBED_PROVIDER: {os.getenv('RAG_EMBED_PROVIDER', 'ollama (default)')}")
     print(f" -> RAG_EMBED_MODEL:    {os.getenv('RAG_EMBED_MODEL', 'nomic-embed-text (default)')}")
-    print(f" -> QDRANT_COLLECTION:  {os.getenv('QDRANT_COLLECTION', 'waste_management_law_nomic_768 (default)')}")
+    print(f" -> QDRANT_COLLECTION:  {os.getenv('QDRANT_COLLECTION', 'waste_management_law_mk_v2 (default)')}")
     
     # 3. Initialize Settings & Client using your code
     print("\n[2/4] Initializing LlamaIndex Settings & Qdrant Client...")
     _configure_llama_index_settings()
     client = get_qdrant_client()
-    collection_name = os.getenv("QDRANT_COLLECTION", "waste_management_law_nomic_768")
+    collection_name = os.getenv("QDRANT_COLLECTION", "waste_management_law_mk_v2")
     
     # 4. Run Safety Check on input query
     try:
@@ -38,7 +38,8 @@ def run_diagnostics(question: str, top_k: int = 5):
     print("\n[3/4] Generating embedding for your query...")
     embed_model = Settings.embed_model
     try:
-        query_vector = embed_model.get_text_embedding(question)
+        # Mirror ragagent.py: query embedding so e5's "query: " prefix applies
+        query_vector = embed_model.get_query_embedding(question)
         print(f" -> Successfully generated vector dims: {len(query_vector)}")
     except Exception as e:
         print(f" -> Failed to generate embedding: {e}")

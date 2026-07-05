@@ -92,7 +92,10 @@ class DirectQdrantQueryEngine:
 		_assert_safe_question(question)
 
 		embed_model = Settings.embed_model
-		query_vector = embed_model.get_text_embedding(question)
+		# get_query_embedding (not get_text_embedding) so asymmetric models
+		# like e5 apply their "query: " prefix — required to match documents
+		# indexed with "passage: ". Identical output for symmetric providers.
+		query_vector = embed_model.get_query_embedding(question)
 
 		response = self.client.query_points(
 			collection_name=self.collection_name,
@@ -215,6 +218,21 @@ def _configure_llama_index_settings() -> None:
 	if embed_provider == "ollama":
 		embedding_model = os.getenv("RAG_EMBED_MODEL", "nomic-embed-text")
 		Settings.embed_model = OllamaEmbedding(model_name=embedding_model)
+	elif embed_provider in ("huggingface", "e5"):
+		# Local sentence-transformers inference (multilingual-e5-large, 1024-dim).
+		# E5 is asymmetric: documents were indexed with "passage: " (scripts/ingest.py),
+		# so queries must carry "query: " — skipping the prefixes badly degrades retrieval.
+		try:
+			from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+		except ModuleNotFoundError as exc:
+			raise RuntimeError("Missing dependency llama-index-embeddings-huggingface") from exc
+
+		embedding_model = os.getenv("RAG_EMBED_MODEL", "intfloat/multilingual-e5-large")
+		Settings.embed_model = HuggingFaceEmbedding(
+			model_name=embedding_model,
+			query_instruction="query: ",
+			text_instruction="passage: ",
+		)
 	elif embed_provider == "openai":
 		if not openai_api_key:
 			raise RuntimeError("OPENAI_API_KEY (or RAG_OPENAI_API_KEY) is required for RAG_EMBED_PROVIDER=openai")
@@ -266,13 +284,15 @@ def get_query_engine(similarity_top_k: int = 6, streaming: bool = False) -> Any:
 	"""Build a query engine from an existing Qdrant collection.
 
 	Expected environment variables:
-	- `QDRANT_COLLECTION` (default: waste_management_law_nomic_768)
+	- `QDRANT_COLLECTION` (default: waste_management_law_mk_v2)
 	- `QDRANT_URL` / `QDRANT_API_KEY` for remote usage
 	- `QDRANT_LOCAL_PATH` for local usage
 	"""
 	_configure_llama_index_settings()
 
-	collection_name = os.getenv("QDRANT_COLLECTION", "waste_management_law_nomic_768")
+	# Unified e5-large collection (waste-law advisor Phase 1) — replaces the
+	# old incompatible nomic_768 / e3small_1536 pair.
+	collection_name = os.getenv("QDRANT_COLLECTION", "waste_management_law_mk_v2")
 	client = get_qdrant_client()
 
 	try:
