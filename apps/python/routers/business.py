@@ -22,7 +22,10 @@ router = APIRouter(prefix="/business", tags=["business"])
 def _get_business_by_owner_auth_id(owner_auth_id: str):
     response = (
         supabase.table("businesses")
-        .select("id, owner_auth_id, name, email, tax_number, transaction_account, depositor, phone, address, logo_url, plan, tenantprofilecontext, created_at")
+        # NOTE: no `plan` here — the live businesses table has no such column
+        # (schema drift vs prisma/schema.prisma); selecting it 42703s the query.
+        # Responses default plan to "free" via .get().
+        .select("id, owner_auth_id, name, email, tax_number, transaction_account, depositor, phone, address, logo_url, tenantprofilecontext, created_at")
         .eq("owner_auth_id", owner_auth_id)
         .limit(1)
         .execute()

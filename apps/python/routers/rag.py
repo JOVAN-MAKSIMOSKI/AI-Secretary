@@ -1,6 +1,9 @@
 """RAG router — POST /rag/query (stateless) and POST /rag/chat (history + profile)."""
 
-from __future__ import annotations
+# NOTE: no `from __future__ import annotations` here — stringified annotations
+# make FastAPI misread the Pydantic request models as query parameters
+# (ForwardRef resolution fails under the current fastapi/pydantic pair) and
+# break OpenAPI generation.
 
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional

@@ -56,6 +56,9 @@ const MAX_TITLE_LENGTH = 500;
 const MAX_NOTES_LENGTH = 5_000;
 const MAX_MESSAGE_LENGTH = 10_000;
 const MAX_LAW_CHAT_HISTORY_MESSAGES = 50;
+// Matches the Python LawChatRequest ChatMessage content cap — anything longer
+// would 422 downstream, so truncate here instead of failing the request
+const MAX_LAW_CHAT_HISTORY_CONTENT_LENGTH = 8_000;
 const AUDIO_MAX_SIZE_BYTES = 25 * 1024 * 1024;
 const ALLOWED_AUDIO_MIMES = new Set([
 	'audio/webm',
@@ -785,7 +788,7 @@ app.post(
 				res.status(422).json({ error: 'history items must be { role: user|assistant, content: string }.' });
 				return;
 			}
-			history.push({ role, content: content.slice(0, MAX_MESSAGE_LENGTH) });
+			history.push({ role, content: content.slice(0, MAX_LAW_CHAT_HISTORY_CONTENT_LENGTH) });
 		}
 
 		const accessToken = parseBearerToken(req);

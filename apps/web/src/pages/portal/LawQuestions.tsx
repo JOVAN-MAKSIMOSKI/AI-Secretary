@@ -1,9 +1,14 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAppContextStore } from "../../store/app-context";
 import { useSessionStore } from "../../store/session";
-import { queryLawDocuments } from "../../connection/supabase-client";
+import { getUserBusiness, queryLawDocuments } from "../../connection/supabase-client";
 import { useLawChat, type ChatMessage } from "../../hooks/useAgent";
 import { useSTT } from "../../hooks/useSTT";
+
+// Caps mirror the agent/python request limits so long chats never 422
+const HISTORY_MAX_MESSAGES = 50;
+const HISTORY_MAX_CONTENT_LENGTH = 8000;
 
 export default function LawQuestions() {
   const tenantId = useSessionStore((state) => state.tenantId);
@@ -14,6 +19,8 @@ export default function LawQuestions() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null = still loading; true/false = whether the waste profile is set up
+  const [hasWasteProfile, setHasWasteProfile] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -29,6 +36,22 @@ export default function LawQuestions() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  // One-time profile check to drive the non-blocking setup banner (Phase 6c);
+  // the advisor still answers without a profile, just less specifically.
+  useEffect(() => {
+    let cancelled = false;
+    getUserBusiness()
+      .then((business) => {
+        if (!cancelled) setHasWasteProfile(Boolean(business?.tenantprofilecontext));
+      })
+      .catch(() => {
+        if (!cancelled) setHasWasteProfile(null); // unknown — stay silent rather than nag
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!transcript) return;
@@ -72,7 +95,14 @@ export default function LawQuestions() {
     abortControllerRef.current = abortController;
 
     try {
-      const answer = await queryLawDocuments(content, 5, abortController.signal);
+      // messages still holds the pre-question conversation here (the new user
+      // message lands in the store asynchronously) — exactly the history the
+      // advisor needs; the current question travels separately.
+      const history = messages.slice(-HISTORY_MAX_MESSAGES).map((m) => ({
+        role: m.role,
+        content: m.content.slice(0, HISTORY_MAX_CONTENT_LENGTH),
+      }));
+      const answer = await queryLawDocuments(content, history, abortController.signal);
       const assistantMessage: ChatMessage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: "assistant",
@@ -129,6 +159,20 @@ export default function LawQuestions() {
             </div>
           </div>
         </div>
+
+        {hasWasteProfile === false && (
+          <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-teal-soft)] px-4 py-2.5">
+            <p className="text-xs text-[var(--brand-ink)]">
+              Set your business waste profile for more specific legal advice.
+            </p>
+            <Link
+              to="/portal/settings"
+              className="shrink-0 text-xs font-medium text-[var(--brand-teal)] hover:underline"
+            >
+              Set up profile →
+            </Link>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {messages.length === 0 && !isLoading ? (

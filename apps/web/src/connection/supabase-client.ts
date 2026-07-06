@@ -1099,7 +1099,20 @@ export async function extractDashboardMessage(message: string, externalSignal?: 
   return payload;
 }
 
-export async function queryLawDocuments(question: string, topK = 5, externalSignal?: AbortSignal): Promise<string> {
+export type LawChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+// Waste-law advisor chat (Phase 6a): routed through apps/agent instead of
+// calling Python directly — the agent resolves the tenant from the JWT and
+// injects the business waste profile as LLM context. History gives the
+// advisor conversation memory across turns.
+export async function queryLawDocuments(
+  question: string,
+  history: LawChatHistoryMessage[] = [],
+  externalSignal?: AbortSignal
+): Promise<string> {
   const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 
   const controller = new AbortController();
@@ -1114,10 +1127,10 @@ export async function queryLawDocuments(question: string, topK = 5, externalSign
 
   let response: Response;
   try {
-    response = await fetch(`${pythonApiBaseUrl}/rag/query`, {
+    response = await fetch(`${agentApiBaseUrl}/agent/waste-law/chat`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ question, top_k: topK }),
+      body: JSON.stringify({ message: question, history }),
       signal: controller.signal,
     });
   } catch (error) {
@@ -1136,10 +1149,9 @@ export async function queryLawDocuments(question: string, topK = 5, externalSign
   if (!response.ok) {
     let detail = "RAG query failed.";
     try {
-      const data = (await response.json()) as { detail?: string };
-      if (data?.detail) {
-        detail = data.detail;
-      }
+      const data = (await response.json()) as { error?: string; detail?: string };
+      // agent routes report failures as { error }; python routes as { detail }
+      detail = data?.error ?? data?.detail ?? detail;
     } catch {
       // keep fallback
     }
