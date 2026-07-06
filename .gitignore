@@ -12,6 +12,9 @@ apps/agent/src/rag-agent/resources/*
 !apps/agent/src/rag-agent/resources/.gitkeep
 /resources/
 
+# Local state of the corpus freshness watcher (scripts/check_new_laws.py)
+apps/python/scripts/last_checked.json
+
 # Python
 backend/.venv/
 __pycache__/
