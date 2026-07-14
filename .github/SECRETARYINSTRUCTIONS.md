@@ -44,7 +44,7 @@ All LLM calls happen exclusively in the TypeScript service — never in Python.
 - Word generation: `python-docx`
 - STT (Speech to Text): `faster-whisper`
 - RAG (retrieval): LlamaIndex with metadata filtering by `tenant_id`
-- Dependencies managed via `requirements.txt` and `venv`
+- Dependencies managed via uv (`pyproject.toml` + `uv.lock`, environment in `.venv`)
 - Never call Claude API from this service
 
 ---

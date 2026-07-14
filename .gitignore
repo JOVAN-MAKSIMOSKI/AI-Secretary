@@ -41,3 +41,6 @@ apps/python/.venv/
 
 # Supabase local temp metadata
 supabase/.temp/
+
+# VS Code workspace files are per-machine editor state
+*.code-workspace

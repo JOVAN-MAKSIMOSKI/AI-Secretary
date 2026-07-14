@@ -6,13 +6,13 @@ Applies when Claude touches any file under `apps/python/**`.
 
 ## Stack
 
-- Runtime: Python 3.11+
+- Runtime: Python 3.12 (pinned via `requires-python = ">=3.12,<3.13"` — the frozen dependency set is only mutually compatible on 3.12)
 - Framework: FastAPI with uvicorn (ASGI server)
 - Excel generation: `openpyxl`
 - Word generation: `python-docx`
 - STT: `faster-whisper`
 - RAG: LlamaIndex with metadata filtering by `tenant_id`
-- Dependencies: `requirements.txt` + `venv`
+- Dependencies: **uv** — `pyproject.toml` (fully pinned) + `uv.lock` (committed), environment in `.venv`. There is no `requirements.txt`; never recreate one.
 
 Never call the Claude API from this service. Never run the agent loop here.
 
@@ -21,12 +21,17 @@ Never call the Claude API from this service. Never run the agent loop here.
 ## Running Locally
 
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 # Interactive docs
 # Swagger UI: http://localhost:8000/docs
 # ReDoc:      http://localhost:8000/redoc
 ```
+
+Startup note: a FastAPI lifespan hook warms the RAG models at boot (~10s) on top
+of the Whisper model load (~27s at import). The service does not accept requests
+until both finish — budget ~40s before the port answers, and set Docker
+healthcheck `start_period` accordingly.
 
 ---
 
@@ -222,12 +227,19 @@ When adding new fields to an extraction chain output, update both the Pydantic m
 
 ---
 
-## Environment Setup
+## Environment Setup (uv)
 
 ```bash
-python3.11 -m venv venv
-source venv/bin/activate   # macOS/Linux
-.\venv\Scripts\activate    # Windows
-pip install -r requirements.txt
-pip freeze > requirements.txt
+uv sync                      # create/update .venv exactly from uv.lock
+uv run <command>             # run anything inside the project environment
+uv add <package>             # add a dependency (updates pyproject.toml + uv.lock)
+uv remove <package>          # remove a dependency
+uv lock                      # re-resolve after manual pyproject.toml edits
 ```
+
+Rules:
+- `pyproject.toml` + `uv.lock` are the single source of dependency truth. Both are committed. Never `pip install` into `.venv` directly and never regenerate a `requirements.txt`.
+- All dependencies are pinned `==` in `pyproject.toml` — when adding a package, pin the version uv resolves.
+- `rvc-python` (optional RVC voice conversion) is deliberately unlisted: `tts/rvc.py` imports it lazily and it is unused unless `RVC_MODEL_PATH` is set. Install manually with `uv pip install rvc-python` if needed.
+- `pywin32` is constrained to the installed version in `[tool.uv]` so `uv sync` never swaps its DLLs under a running service (Windows locks loaded DLLs); it is Windows-only and never installs in Linux/Docker builds.
+- Docker installs with `uv sync --frozen` — fails the build if `uv.lock` is out of date instead of silently re-resolving.

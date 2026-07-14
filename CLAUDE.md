@@ -46,7 +46,7 @@ Project rules are split across scoped files so context only loads when relevant.
 | `.claude/rules/conventions.md` | Always | Naming, imports, commit messages, file structure |
 | `.claude/rules/frontend.md` | `apps/web/**` | React rules, state management, shadcn/ui, routing |
 | `.claude/rules/agent-service.md` | `apps/agent/**` | LangGraph patterns, tool nodes, approval gate, caching |
-| `.claude/rules/python-service.md` | `apps/python/**` | FastAPI routes, openpyxl, python-docx, RAG, STT |
+| `.claude/rules/python-service.md` | `apps/python/**` | FastAPI routes, openpyxl, python-docx, RAG, STT, uv dependency management |
 | `.claude/skills/mcp-architecture/` | On demand | MCP client, transport, sampling, elicitation |
 | `.claude/skills/skill-management/` | On demand | Skill creation, testing, post-session review, auditing |
 | `.github/architecture.md` | Reference | Full repo tree, service boundaries, LLM resolver contract |
