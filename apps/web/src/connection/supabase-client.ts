@@ -142,9 +142,8 @@ export type DocumentTemplateResponse = {
 // selections that apps/agent formats into the RAG prompt as tenant context
 export type TenantWasteProfile = {
   entity_type: "individual" | "small_business" | "large_company" | "municipality" | null;
-  business_sector: "construction" | "healthcare" | "automotive" | "retail" | "food" | "other" | null;
   waste_types: Array<
-    "hazardous" | "construction" | "packaging" | "electronic" | "municipal" | "paper_textile" | "other"
+    "hazardous_waste" | "oils_tires" | "textile_paper" | "glass" | "plastic" | "other"
   >;
   annual_volume: "under_200kg" | "200kg_5t" | "5t_plus" | null;
   location: string | null;
@@ -1160,6 +1159,96 @@ export async function queryLawDocuments(
 
   const data = (await response.json()) as { answer: string };
   return data.answer;
+}
+
+// Streaming variant of queryLawDocuments: consumes the agent's SSE relay and
+// invokes onDelta per text chunk so the page can render the answer as it is
+// generated. Resolves with the full answer text once the stream completes.
+export async function queryLawDocumentsStream(
+  question: string,
+  history: LawChatHistoryMessage[],
+  onDelta: (delta: string) => void,
+  externalSignal?: AbortSignal
+): Promise<string> {
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), RAG_TIMEOUT_MS);
+
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", onExternalAbort);
+  }
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch(`${agentApiBaseUrl}/agent/waste-law/chat/stream`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ message: question, history }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if ((error as Error).name === "AbortError" && !externalSignal?.aborted) {
+        throw new Error("RAG query timed out. The model may still be loading — try again shortly.");
+      }
+      throw error;
+    }
+
+    if (!response.ok || !response.body) {
+      let detail = "RAG query failed.";
+      try {
+        const data = (await response.json()) as { error?: string; detail?: string };
+        detail = data?.error ?? data?.detail ?? detail;
+      } catch {
+        // keep fallback
+      }
+      throw new Error(detail);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+
+    // SSE framing: data-only JSON events separated by blank lines.
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let separatorIndex: number;
+      while ((separatorIndex = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, separatorIndex).trim();
+        buffer = buffer.slice(separatorIndex + 2);
+        if (!block.startsWith("data: ")) continue;
+
+        const event = JSON.parse(block.slice(6)) as { delta?: string; done?: boolean; error?: string };
+        if (event.error) {
+          throw new Error(event.error);
+        }
+        if (event.delta) {
+          fullText += event.delta;
+          onDelta(event.delta);
+        }
+        if (event.done) {
+          return fullText;
+        }
+      }
+    }
+
+    // Stream closed without a done event — connection dropped mid-answer.
+    if (!fullText) {
+      throw new Error("The answer stream ended unexpectedly. Please retry.");
+    }
+    return fullText;
+  } finally {
+    window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
+  }
 }
 
 const STT_TIMEOUT_MS = 30_000;

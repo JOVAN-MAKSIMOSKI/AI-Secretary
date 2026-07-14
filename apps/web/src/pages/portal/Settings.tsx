@@ -8,6 +8,7 @@ import {
 } from "../../connection/supabase-client";
 import { useAppContextStore, type SttMode } from "../../store/app-context";
 import WasteProfileSection from "../../components/portal/WasteProfileSection";
+import DocumentTemplateSection from "../../components/portal/DocumentTemplateSection";
 
 type Banner = {
   tone: "success" | "error";
@@ -127,8 +128,9 @@ export default function Settings() {
   };
 
   return (
-    <section className="mx-auto w-full max-w-4xl p-6 md:p-8">
-      <div className="rounded-xl border border-[var(--brand-border)] bg-white p-6 shadow-sm">
+    <section className="min-h-full w-full bg-white">
+      <div className="mx-auto w-full max-w-4xl p-6 md:p-8">
+      <div className="rounded-xl border border-[var(--brand-border)]  p-6 shadow-sm">  
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-text-muted)]">Settings</p>
         <h1 className="mt-3 text-2xl font-semibold text-[var(--brand-ink)]">Gmail Integration</h1>
         <p className="mt-2 text-sm text-[var(--brand-text-muted)]">
@@ -232,8 +234,12 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* Document template upload (moved here from the Documents page) */}
+      <DocumentTemplateSection />
+
       {/* Waste-law advisor profile (feeds tenant context into RAG answers) */}
       <WasteProfileSection />
+      </div>
     </section>
   );
 }

@@ -15,6 +15,7 @@ import { logger } from '../lib/logger.js';
 import { resolveChainWithLlm } from '../agent/nodes/llmResolver.js';
 import { getChainRegistry, type ChainId } from '../agent/nodes/chainRegistry.js';
 import { createCalendarEvent } from '../mcp/calendar.js';
+import { GmailReconnectRequiredError } from '../lib/gmailOAuth.js';
 import { z } from 'zod';
 import {
   getOrCreateCallState,
@@ -44,15 +45,18 @@ const STT_TIMEOUT_MS = 30_000;
 // spoken number) for order_number/units; values above this overflow the DB column.
 const PG_INT4_MAX = 2147483647;
 
-const VOICE_GREETING = "Hello, I am your AI secretary. How can I help you?";
-const VOICE_WAIT = "Please wait while I process your request.";
-const VOICE_RETRY = "Sorry, I didn't catch that. Could you please repeat it?";
-// const VOICE_CANCEL = "Understood, the request has been cancelled. What else can I help you with?";
-const VOICE_ERROR = "An error occurred. Please try again.";
+const VOICE_GREETING = "Здраво, јас сум вашата виртуелна секретарка. Како можам да ви помогнам?";
+const VOICE_WAIT = "Ве молам почекајте, го обработувам вашето барање.";
+const VOICE_RETRY = "Извинете, не ве разбрав. Можете ли да повторите?";
+// const VOICE_CANCEL = "Во ред, барањето е откажано. Со што друго можам да ви помогнам?";
+const VOICE_ERROR = "Настана грешка. Ве молам обидете се повторно.";
+// Fixed confirmation for a successful booking, with its own follow-up prompt baked in.
+// Returned verbatim — the generic follow-up is not appended (see processRecording).
+const VOICE_BOOKING_SUCCESS = "Успешно извршена наредба. Како можам понатаму да ви помогнам?";
 const VOICE_SYSTEM_PROMPT =
-  'You are a voice secretary assistant speaking English. Respond in 1-2 short sentences ' +
-  'with no markdown, no lists, and no special characters. Your response will be spoken aloud ' +
-  'over a phone call. Keep it concise and natural.';
+  'Ти си гласовна секретарка која зборува македонски. Одговарај со 1-2 кратки реченици, ' +
+  'без markdown, без листи и без специјални знаци. Твојот одговор ќе биде изговорен на глас ' +
+  'преку телефонски повик. Биди концизна и природна.';
 
 // const CHAIN_DESCRIPTIONS: Record<ChainId, string> = {
 //   invoice_extraction: 'prepare an invoice',
@@ -193,7 +197,7 @@ async function executeChain(
         const clientTaxNumber = (extracted.client_tax_number as string | undefined) ?? '';
 
         if (!clientId || !clientName) {
-          return "I couldn't identify the client. Please make sure the client name is clear.";
+          return "Не можев да го идентификувам клиентот. Ве молам осигурете се дека името на клиентот е јасно.";
         }
 
         // Step 2: generate invoice_number from the business invoice_counter — the same
@@ -250,7 +254,7 @@ async function executeChain(
         if (!genResponse.ok) {
           const errText = await genResponse.text().catch(() => '');
           logger.error({ status: genResponse.status, body: errText }, 'Invoice generation endpoint failed');
-          return "I couldn't generate the invoice. Please check that all details are correct.";
+          return "Не можев да ја генерирам фактурата. Ве молам проверете дали сите детали се точни.";
         }
 
         // Drain the XLSX response body so the connection is released cleanly
@@ -262,19 +266,19 @@ async function executeChain(
           'executeChain invoice timing',
         );
 
-        return 'Invoice generated successfully.';
+        return 'Фактурата е успешно генерирана.';
       } catch (err) {
         logger.error(
           { err: err instanceof Error ? err.message : String(err) },
           'Invoice generation from voice failed',
         );
-        return "I couldn't generate the invoice. Please make sure the client name and details are clear.";
+        return "Не можев да ја генерирам фактурата. Ве молам осигурете се дека името на клиентот и деталите се јасни.";
       }
     }
 
     case 'offer_extraction': {
       await callPythonExtraction('/documents/extract-offer', transcript, tenantId);
-      return 'The offer has been prepared. You can view it in your panel.';
+      return 'Понудата е подготвена. Можете да ја видите во вашиот панел.';
     }
 
     case 'calendar_event_extraction': {
@@ -283,7 +287,7 @@ async function executeChain(
       const parsed = calendarExtractionSchema.safeParse(extracted);
 
       if (!parsed.success) {
-        return "I couldn't extract the meeting details. Please provide the date and time.";
+        return "Не можев да ги извлечам деталите за состанокот. Ве молам наведете датум и време.";
       }
 
       const { event_name, event_date, event_time, duration_minutes } = parsed.data;
@@ -298,22 +302,28 @@ async function executeChain(
           startTime,
           durationMinutes: duration_minutes,
         });
-        return `The meeting "${event_name}" is scheduled for ${event_date} at ${event_time}.`;
+        return VOICE_BOOKING_SUCCESS;
       } catch (err) {
         logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Calendar event creation failed');
-        return "I couldn't schedule the meeting. Please check that Google Calendar is connected.";
+        // Only claim a connection/authorization problem when that is genuinely the cause
+        // (missing connection or a revoked/expired token). Every other failure gets a
+        // neutral retry message instead of falsely blaming the Google Calendar connection.
+        if (err instanceof GmailReconnectRequiredError) {
+          return "Не можев да го закажам состанокот бидејќи пристапот до Google Calendar е истечен или не е поврзан. Ве молам повторно поврзете го Google Calendar.";
+        }
+        return "Не можев да го закажам состанокот. Ве молам обидете се повторно.";
       }
     }
 
     default:
-      return 'The action is unknown. Please try again.';
+      return 'Дејството е непознато. Ве молам обидете се повторно.';
   }
 }
 
 // Generates a short conversational reply using Claude Haiku for non-command requests.
 async function generateConversationalReply(state: CallState): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return "I'm sorry, I can't respond right now.";
+  if (!apiKey) return "Извинете, не можам да одговорам во моментов.";
 
   try {
     const anthropic = new Anthropic({ apiKey });
@@ -350,7 +360,7 @@ export async function handleVoiceEntry(req: Request, res: Response): Promise<voi
 
   if (!tenantId) {
     logger.warn({ callSid, callerPhone }, isWebRtc ? 'WebRTC call with unknown identity' : 'Twilio call from unregistered number');
-    const errorId = await generateAndCacheSpeech('Sorry, your number is not registered. Goodbye.').catch(() => null);
+    const errorId = await generateAndCacheSpeech('Жал ми е, вашиот број не е регистриран. Довидување.').catch(() => null);
     const play = errorId ? buildPlayVerb(errorId) : `<Say language="en-US">Sorry, your number is not registered. Goodbye.</Say>`;
     res.type('text/xml').send(twiml(play));
     return;
@@ -465,8 +475,8 @@ async function processRecording(
 
     const form = new FormData();
     form.append('audio', new Blob([new Uint8Array(audioBuffer)]), 'recording.wav');
-    // Temporary: English testing. Revert to 'mk' (or drop the field) for Macedonian.
-    form.append('language', 'en');
+    // Macedonian STT — matches the Macedonian voice + prompts.
+    form.append('language', 'mk');
 
     const sttStart = Date.now();
     const sttResponse = await fetch(`${PY_SERVICE_URL}/stt/transcribe`, {
@@ -497,7 +507,12 @@ async function processRecording(
 
       if (decision.confidence >= CONFIDENCE_THRESHOLD) {
         const resultText = await executeChain(decision.chainId, transcript, tenantId, state);
-        responseText = `${resultText} What else can I help you with?`;
+        // A successful booking gets the terse confirmation alone; every other result —
+        // including chain error messages — keeps the conversational follow-up prompt.
+        responseText =
+          resultText === VOICE_BOOKING_SUCCESS
+            ? resultText
+            : `${resultText} Со што друго можам да ви помогнам?`;
       } else {
         // Low confidence — handle as general conversation.
         responseText = await generateConversationalReply(state);

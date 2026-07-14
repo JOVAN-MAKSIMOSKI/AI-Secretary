@@ -25,6 +25,15 @@ const ENTITY_LABELS: Record<string, string> = {
   municipality: 'municipality',
 };
 
+const WASTE_TYPE_LABELS: Record<string, string> = {
+  hazardous_waste: 'hazardous waste',
+  oils_tires: 'oil and tire waste',
+  textile_paper: 'textile and paper',
+  glass: 'glass',
+  plastic: 'plastic',
+  other: 'other',
+};
+
 const VOLUME_LABELS: Record<string, string> = {
   under_200kg: 'under 200 kg per year',
   '200kg_5t': 'between 200 kg and 5 tons per year',
@@ -41,7 +50,8 @@ export function buildTenantContext(profile: TenantWasteProfile): string {
     parts.push(`Business sector: ${profile.business_sector}.`);
   }
   if (profile.waste_types?.length) {
-    parts.push(`Waste types generated: ${profile.waste_types.join(', ')}.`);
+    const wasteLabels = profile.waste_types.map(w => WASTE_TYPE_LABELS[w] ?? w);
+    parts.push(`Waste types generated: ${wasteLabels.join(', ')}.`);
   }
   if (profile.annual_volume) {
     parts.push(`Annual waste volume: ${VOLUME_LABELS[profile.annual_volume] ?? profile.annual_volume}.`);
@@ -57,13 +67,17 @@ export function buildTenantContext(profile: TenantWasteProfile): string {
   return parts.join(' ');
 }
 
-export async function runWasteLawChain(input: {
+interface WasteLawChainInput {
   tenantId: string;
   userAuthId: string;
   accessToken: string;
   message: string;
   history: WasteLawChatMessage[];
-}): Promise<{ answer: string }> {
+}
+
+// Shared by the buffered and streaming variants: resolve the tenant's waste
+// profile and POST the chat payload to the given Python endpoint.
+async function fetchWasteLawEndpoint(input: WasteLawChainInput, path: string): Promise<globalThis.Response> {
   const business = await prisma.businesses.findUnique({
     where: { owner_auth_id: input.tenantId },
     select: { tenantprofilecontext: true },
@@ -73,7 +87,7 @@ export async function runWasteLawChain(input: {
     ? buildTenantContext(business.tenantprofilecontext as unknown as TenantWasteProfile)
     : '';
 
-  const response = await fetch(`${PYTHON_SERVICE_URL}/rag/chat`, {
+  return fetch(`${PYTHON_SERVICE_URL}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -86,6 +100,10 @@ export async function runWasteLawChain(input: {
       top_k: WASTE_LAW_TOP_K,
     }),
   });
+}
+
+export async function runWasteLawChain(input: WasteLawChainInput): Promise<{ answer: string }> {
+  const response = await fetchWasteLawEndpoint(input, '/rag/chat');
 
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
@@ -107,4 +125,28 @@ export async function runWasteLawChain(input: {
   });
 
   return { answer };
+}
+
+export async function runWasteLawChainStream(
+  input: WasteLawChainInput,
+): Promise<{ stream: ReadableStream<Uint8Array> }> {
+  const response = await fetchWasteLawEndpoint(input, '/rag/chat/stream');
+
+  if (!response.ok || !response.body) {
+    // Pre-stream failures arrive as ordinary JSON error bodies from FastAPI.
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const detail = typeof payload.detail === 'string' ? payload.detail : 'Waste-law chat request failed.';
+    throw new Error(detail);
+  }
+
+  // Audit the question once the upstream accepts it — mid-stream failures are
+  // reported inside the SSE stream and don't produce a second audit entry.
+  await writeAuditLog({
+    tenantId: input.tenantId,
+    userAuthId: input.userAuthId,
+    action: 'law.query',
+    meta: { questionLength: input.message.length, historyLength: input.history.length, streamed: true },
+  });
+
+  return { stream: response.body };
 }

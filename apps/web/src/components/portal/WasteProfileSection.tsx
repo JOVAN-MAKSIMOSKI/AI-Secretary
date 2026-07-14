@@ -19,23 +19,13 @@ const ENTITY_TYPE_OPTIONS = [
   { value: "municipality", label: "Municipality" },
 ] as const;
 
-const BUSINESS_SECTOR_OPTIONS = [
-  { value: "construction", label: "Construction" },
-  { value: "healthcare", label: "Healthcare" },
-  { value: "automotive", label: "Automotive" },
-  { value: "retail", label: "Retail" },
-  { value: "food", label: "Food" },
-  { value: "other", label: "Other" },
-] as const;
-
 const WASTE_TYPE_OPTIONS = [
-  { value: "hazardous", label: "Hazardous" },
-  { value: "construction", label: "Construction" },
-  { value: "packaging", label: "Packaging" },
-  { value: "electronic", label: "Electronic" },
-  { value: "municipal", label: "Municipal" },
-  { value: "paper_textile", label: "Paper & Textile" },
-  { value: "other", label: "Other" },
+  { value: "hazardous_waste", label: "Опасен отпад (Hazardous waste)" },
+  { value: "oils_tires", label: "Отпад на масла и гуми (Oil and tire waste)" },
+  { value: "textile_paper", label: "Текстил и хартија (Textile and paper)" },
+  { value: "glass", label: "Стакло (Glass)" },
+  { value: "plastic", label: "Пластика (Plastic)" },
+  { value: "other", label: "Друго (Other)" },
 ] as const;
 
 const ANNUAL_VOLUME_OPTIONS = [
@@ -47,9 +37,8 @@ const ANNUAL_VOLUME_OPTIONS = [
 // Empty string = "not selected" in the form; mapped to null on submit
 const wasteProfileFormSchema = z.object({
   entity_type: z.enum(["", "individual", "small_business", "large_company", "municipality"]),
-  business_sector: z.enum(["", "construction", "healthcare", "automotive", "retail", "food", "other"]),
   waste_types: z.array(
-    z.enum(["hazardous", "construction", "packaging", "electronic", "municipal", "paper_textile", "other"])
+    z.enum(["hazardous_waste", "oils_tires", "textile_paper", "glass", "plastic", "other"])
   ),
   annual_volume: z.enum(["", "under_200kg", "200kg_5t", "5t_plus"]),
   location: z.string().max(120),
@@ -61,7 +50,6 @@ type WasteProfileFormValues = z.infer<typeof wasteProfileFormSchema>;
 
 const EMPTY_FORM: WasteProfileFormValues = {
   entity_type: "",
-  business_sector: "",
   waste_types: [],
   annual_volume: "",
   location: "",
@@ -73,7 +61,6 @@ function profileToFormValues(profile: TenantWasteProfile | null): WasteProfileFo
   if (!profile) return EMPTY_FORM;
   return {
     entity_type: profile.entity_type ?? "",
-    business_sector: profile.business_sector ?? "",
     waste_types: profile.waste_types ?? [],
     annual_volume: profile.annual_volume ?? "",
     location: profile.location ?? "",
@@ -85,7 +72,6 @@ function profileToFormValues(profile: TenantWasteProfile | null): WasteProfileFo
 function formValuesToProfile(values: WasteProfileFormValues): TenantWasteProfile {
   return {
     entity_type: values.entity_type || null,
-    business_sector: values.business_sector || null,
     waste_types: values.waste_types,
     annual_volume: values.annual_volume || null,
     location: values.location.trim() || null,
@@ -183,16 +169,6 @@ export default function WasteProfileSection() {
               <select id="entity_type" {...register("entity_type")} className={selectClasses}>
                 <option value="">Not selected</option>
                 {ENTITY_TYPE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className={labelClasses} htmlFor="business_sector">Business sector</label>
-              <select id="business_sector" {...register("business_sector")} className={selectClasses}>
-                <option value="">Not selected</option>
-                {BUSINESS_SECTOR_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>

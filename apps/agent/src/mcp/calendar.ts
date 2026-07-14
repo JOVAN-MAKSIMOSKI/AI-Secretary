@@ -7,6 +7,18 @@ import { buildGmailAuthClient, GmailReconnectRequiredError } from '../lib/gmailO
 const calendarApi = google.calendar('v3');
 const DEFAULT_BUSINESS_TIMEZONE = 'Europe/Skopje';
 
+// Google returns `invalid_grant` at API-call time when the stored refresh token has been
+// revoked or has expired (common while the OAuth app is still in "Testing" mode, where
+// refresh tokens die after 7 days). This surfaces from the events.insert/list call, not
+// from the connection lookup, so it never hits the GmailReconnectRequiredError branch on
+// its own — detect it here and reclassify it as reconnect-required so callers can prompt
+// a re-authorization instead of masking it as a generic failure.
+function isInvalidGrantError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const gaxios = error as { message?: string; response?: { data?: { error?: string } } };
+  return gaxios.response?.data?.error === 'invalid_grant' || (gaxios.message ?? '').includes('invalid_grant');
+}
+
 function normalizeCalendarDateTime(value: string): string {
   const trimmed = value.trim();
   // Local wall-time form used by resolver, interpreted with DEFAULT_BUSINESS_TIMEZONE.
@@ -152,8 +164,13 @@ export async function createCalendarEvent(
       description: result.data.description || input.description,
     };
   } catch (error) {
+    // Preserve the typed reconnect error (don't flatten to a generic Error) so callers can
+    // instanceof-check it; treat a revoked/expired token as the same reconnect-required case.
     if (error instanceof GmailReconnectRequiredError) {
-      throw new Error(`Failed to create calendar event: ${error.message} Please reconnect Google.`);
+      throw error;
+    }
+    if (isInvalidGrantError(error)) {
+      throw new GmailReconnectRequiredError('Google authorization has expired or been revoked. Please reconnect Google.');
     }
 
     const message = error instanceof Error ? error.message : String(error);

@@ -27,7 +27,7 @@ import {
 	GmailReconnectRequiredError,
 } from './lib/gmailOAuth.js';
 import { runDirectResolverChain } from './agent/directResolverChain.js';
-import { runWasteLawChain, type WasteLawChatMessage } from './agent/wasteLawChain.js';
+import { runWasteLawChain, runWasteLawChainStream, type WasteLawChatMessage } from './agent/wasteLawChain.js';
 import { createCalendarEvent, deleteCalendarEvent, listCalendarEvents } from './mcp/calendar.js';
 import { getGmailInboxStats, getDocumentBuffer } from './mcp/gmail.js';
 import JSZip from 'jszip';
@@ -747,6 +747,57 @@ app.post(
 	},
 );
 
+// Validates auth + body for the waste-law chat routes (buffered and streaming).
+// Writes the error response and returns null when the request is rejected;
+// Python re-validates via LawChatRequest.
+function parseWasteLawChatRequest(
+	req: AuthenticatedRequest,
+	res: Response,
+): { userAuthId: string; accessToken: string; message: string; history: WasteLawChatMessage[] } | null {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) {
+		res.status(401).json({ error: 'Missing authenticated user.' });
+		return null;
+	}
+
+	const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+	if (!message) {
+		res.status(422).json({ error: 'message is required.' });
+		return null;
+	}
+	if (message.length > MAX_MESSAGE_LENGTH) {
+		res.status(422).json({ error: `message must not exceed ${MAX_MESSAGE_LENGTH} characters.` });
+		return null;
+	}
+
+	// History is untrusted client input — validate shape and cap size here.
+	const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+	if (rawHistory.length > MAX_LAW_CHAT_HISTORY_MESSAGES) {
+		res.status(422).json({
+			error: `history must not exceed ${MAX_LAW_CHAT_HISTORY_MESSAGES} messages.`,
+		});
+		return null;
+	}
+	const history: WasteLawChatMessage[] = [];
+	for (const item of rawHistory) {
+		const role = item?.role;
+		const content = typeof item?.content === 'string' ? item.content.trim() : '';
+		if ((role !== 'user' && role !== 'assistant') || !content) {
+			res.status(422).json({ error: 'history items must be { role: user|assistant, content: string }.' });
+			return null;
+		}
+		history.push({ role, content: content.slice(0, MAX_LAW_CHAT_HISTORY_CONTENT_LENGTH) });
+	}
+
+	const accessToken = parseBearerToken(req);
+	if (!accessToken) {
+		res.status(401).json({ error: 'Missing bearer token.' });
+		return null;
+	}
+
+	return { userAuthId, accessToken, message, history };
+}
+
 // Waste-law advisor chat (waste-law RAG plan, Phase 5) — dedicated route so the
 // law questions page can pass its conversation history; tenant profile context
 // is resolved here from the JWT and injected into the Python /rag/chat call.
@@ -755,47 +806,9 @@ app.post(
 	requireAuth,
 	agentLimiter,
 	async (req: AuthenticatedRequest, res: Response) => {
-		const userAuthId = req.userAuthId;
-		if (!userAuthId) {
-			res.status(401).json({ error: 'Missing authenticated user.' });
-			return;
-		}
-
-		const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
-		if (!message) {
-			res.status(422).json({ error: 'message is required.' });
-			return;
-		}
-		if (message.length > MAX_MESSAGE_LENGTH) {
-			res.status(422).json({ error: `message must not exceed ${MAX_MESSAGE_LENGTH} characters.` });
-			return;
-		}
-
-		// History is untrusted client input — validate shape and cap size here;
-		// Python re-validates via LawChatRequest.
-		const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
-		if (rawHistory.length > MAX_LAW_CHAT_HISTORY_MESSAGES) {
-			res.status(422).json({
-				error: `history must not exceed ${MAX_LAW_CHAT_HISTORY_MESSAGES} messages.`,
-			});
-			return;
-		}
-		const history: WasteLawChatMessage[] = [];
-		for (const item of rawHistory) {
-			const role = item?.role;
-			const content = typeof item?.content === 'string' ? item.content.trim() : '';
-			if ((role !== 'user' && role !== 'assistant') || !content) {
-				res.status(422).json({ error: 'history items must be { role: user|assistant, content: string }.' });
-				return;
-			}
-			history.push({ role, content: content.slice(0, MAX_LAW_CHAT_HISTORY_CONTENT_LENGTH) });
-		}
-
-		const accessToken = parseBearerToken(req);
-		if (!accessToken) {
-			res.status(401).json({ error: 'Missing bearer token.' });
-			return;
-		}
+		const parsed = parseWasteLawChatRequest(req, res);
+		if (!parsed) return;
+		const { userAuthId, accessToken, message, history } = parsed;
 
 		try {
 			const tenantId = await getTenantForUser(userAuthId);
@@ -803,6 +816,52 @@ app.post(
 			res.json({ answer: result.answer });
 		} catch (error) {
 			res.status(400).json({ error: toSafeError(error, 'Failed to answer waste-law question.') });
+		}
+	},
+);
+
+// SSE variant — pipes the Python /rag/chat/stream response through verbatim so
+// the law page can render the answer as it is generated. Transport only: all
+// business logic stays in wasteLawChain / the Python service.
+app.post(
+	'/agent/waste-law/chat/stream',
+	requireAuth,
+	agentLimiter,
+	async (req: AuthenticatedRequest, res: Response) => {
+		const parsed = parseWasteLawChatRequest(req, res);
+		if (!parsed) return;
+		const { userAuthId, accessToken, message, history } = parsed;
+
+		let stream: ReadableStream<Uint8Array>;
+		try {
+			const tenantId = await getTenantForUser(userAuthId);
+			({ stream } = await runWasteLawChainStream({ tenantId, userAuthId, accessToken, message, history }));
+		} catch (error) {
+			res.status(400).json({ error: toSafeError(error, 'Failed to answer waste-law question.') });
+			return;
+		}
+
+		res.setHeader('Content-Type', 'text/event-stream');
+		res.setHeader('Cache-Control', 'no-cache');
+		res.setHeader('Connection', 'keep-alive');
+		res.flushHeaders();
+
+		const reader = stream.getReader();
+		// Stop pulling from Python when the browser disconnects mid-answer.
+		req.on('close', () => {
+			void reader.cancel().catch(() => undefined);
+		});
+
+		try {
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				res.write(value);
+			}
+		} catch (error) {
+			logger.error({ error: toSafeError(error, 'relay failure') }, 'Waste-law stream relay failed');
+		} finally {
+			res.end();
 		}
 	},
 );
