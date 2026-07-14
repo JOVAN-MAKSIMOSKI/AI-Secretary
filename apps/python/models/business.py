@@ -14,10 +14,9 @@ class WasteProfileContext(BaseModel):
     """
 
     entity_type: Literal["individual", "small_business", "large_company", "municipality"] | None = None
-    business_sector: Literal["construction", "healthcare", "automotive", "retail", "food", "other"] | None = None
     waste_types: list[
-        Literal["hazardous", "construction", "packaging", "electronic", "municipal", "paper_textile", "other"]
-    ] = Field(default_factory=list, max_length=7)
+        Literal["hazardous_waste", "oils_tires", "textile_paper", "glass", "plastic", "other"]
+    ] = Field(default_factory=list, max_length=6)
     annual_volume: Literal["under_200kg", "200kg_5t", "5t_plus"] | None = None
     location: str | None = Field(default=None, max_length=120)
     has_permits: bool = False

@@ -23,6 +23,10 @@ if _missing_env_vars:
         + ". Set them in apps/python/.env (INTER_SERVICE_SECRET must match apps/agent/.env)."
     )
 
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -37,9 +41,36 @@ from routers.rag import router as rag_router
 from routers.stt import router as stt_router
 from routers.tts import router as tts_router
 
+logger = logging.getLogger(__name__)
+
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(title="Secretary Python Service", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+	# Warm the RAG models at boot so the first law question doesn't pay the
+	# ~12s e5 model load on its critical path. Best-effort (same policy as the
+	# STT warmup in stt/whisper.py): a misconfigured RAG provider must not take
+	# down the document/business/client routes. On failure the configured flag
+	# in ragagent stays unset, so the first /rag request retries and surfaces
+	# the real error to the caller.
+	def _warm_rag() -> None:
+		from llama_index.core import Settings
+		from services.ragagent import _configure_llama_index_settings
+
+		_configure_llama_index_settings()
+		# One tiny embed so lazy kernel/tokenizer init is also off the request path.
+		Settings.embed_model.get_query_embedding("warmup")
+
+	try:
+		await asyncio.to_thread(_warm_rag)
+		logger.info("RAG models warmed at startup")
+	except Exception as exc:
+		logger.error("RAG warmup failed — first /rag request will retry: %s", exc)
+	yield
+
+
+app = FastAPI(title="Secretary Python Service", version="0.1.0", lifespan=lifespan)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

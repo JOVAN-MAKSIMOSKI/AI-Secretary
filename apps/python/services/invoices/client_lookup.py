@@ -129,6 +129,21 @@ def _normalized_or_empty(value: str) -> str:
     return " ".join(_normalize_name_tokens(value))
 
 
+def _token_similarity(source_tokens: set[str], other_tokens: set[str]) -> float:
+    """Average best per-token match ratio of each source token against the closest
+    other token. Unlike exact set intersection, this rewards near-miss tokens — a
+    misheard 'joven' still scores ~0.8 against 'jovan' — which is exactly what STT
+    errors produce. Diluting names (a surname the caller didn't say) no longer drops
+    the whole-string score below threshold."""
+    if not source_tokens or not other_tokens:
+        return 0.0
+
+    total = 0.0
+    for source in source_tokens:
+        total += max(SequenceMatcher(None, source, other).ratio() for other in other_tokens)
+    return total / len(source_tokens)
+
+
 def _score_candidate(normalized_target: str, normalized_candidate: str) -> float:
     if not normalized_target or not normalized_candidate:
         return 0.0
@@ -151,7 +166,22 @@ def _score_candidate(normalized_target: str, normalized_candidate: str) -> float
     jaccard = len(intersection) / len(union) if union else 0.0
     sequence = SequenceMatcher(None, normalized_target, normalized_candidate).ratio()
 
-    return max(sequence, coverage * 0.96, ((coverage + recall) / 2) * 0.94, jaccard * 0.92)
+    # Per-token fuzzy matching, recall-weighted: the spoken input is often a subset of
+    # the stored name (first name only vs "Jovan Maksimoski"), so covering every *spoken*
+    # token well matters more than covering every stored token. fuzzy_recall is used
+    # unweighted so the per-token bar equals the global threshold — a single-edit mishear
+    # like "Jove"→"Jovan" (~0.67) still clears it instead of being penalised under.
+    fuzzy_recall = _token_similarity(target_tokens, candidate_tokens)
+    fuzzy_coverage = _token_similarity(candidate_tokens, target_tokens)
+    fuzzy_token_score = max(fuzzy_recall, ((fuzzy_recall + fuzzy_coverage) / 2) * 0.94)
+
+    return max(
+        sequence,
+        coverage * 0.96,
+        ((coverage + recall) / 2) * 0.94,
+        jaccard * 0.92,
+        fuzzy_token_score,
+    )
 
 
 def _select_best_fuzzy_match(rows: list[dict[str, Any]], normalized_target: str) -> dict[str, Any] | None:

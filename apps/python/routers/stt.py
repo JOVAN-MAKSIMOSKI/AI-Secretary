@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import tempfile
 import time
 
@@ -26,6 +27,24 @@ try:
     _BEAM_SIZE = max(1, int(os.getenv("STT_BEAM_SIZE", "5")))
 except ValueError:
     _BEAM_SIZE = 5
+
+# Whisper often groups long spoken digit sequences with hyphens (e.g. an order number
+# dictated as "032832832" comes back as "032-832-832"). Downstream number parsing treats
+# an internal hyphen as invalid, so a single number gets dropped. Merge hyphen-joined
+# digit groups back into one contiguous number — but leave ISO dates (YYYY-MM-DD) intact,
+# since collapsing those would corrupt any date the invoice flow depends on.
+_HYPHENATED_DIGIT_GROUPS = re.compile(r"\d+(?:-\d+)+")
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _merge_hyphenated_digit_groups(text: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if _ISO_DATE.match(token):
+            return token
+        return token.replace("-", "")
+
+    return _HYPHENATED_DIGIT_GROUPS.sub(_replace, text)
 
 
 @router.post("/transcribe", response_model=TranscribeResponse)
@@ -66,6 +85,8 @@ async def transcribe(
             condition_on_previous_text=False,  # Faster; avoids hallucination loops on short clips
         )
         text = " ".join(segment.text for segment in segments)
+        # Collapse hyphen-separated digit groups so numbers stay contiguous (see helper above).
+        text = _merge_hyphenated_digit_groups(text)
         # segments is a lazy generator — decode wall time is only known after it is drained.
         transcribe_ms = int((time.monotonic() - transcribe_start) * 1000)
         logger.info(

@@ -1,4 +1,10 @@
-test for the invopice generation, measure if it is 1.20>=
+background in settings page, in settings page where you up[load the template remove the id], fix the price per unit missing shit because i cant generate an invoice, test google calendar twilio call
+history_block that gets inserted into context
+write and store a plan for future self on how to update a collection if it gets outdated
+how does the chat storing with zustand work?
+
+understand supabase-client.ts
+check with claude why is the index not used, try to switch to macedonian testing, in elevenlabs, convert the voice to female
 ask claude how would the latency be if we executed the plan fully
 order number isnt interpreted correctly
 latency needs major improvements!
@@ -21,7 +27,7 @@ delete all the debuging scripts and files
 ensure RLS security is set up properly
 add indexes for performance when querying
 time zone stays fixed
-consider adding a stronger LLM once finishing the app because request in macedonian might be a problem for the current ollama model.
+ollama removed — extraction, RAG synthesis and invoice text all run on the RAG_LLM_PROVIDER stack (openai/gpt-4o-mini today). re-check macedonian extraction quality if the model changes.
 
 *Add system prompts in the routers (or a dedicated services/prompts.py file) where you know the context.
 For example, when you implement routers/rag.py, the RAG-specific system prompt lives there. A document generation prompt lives in routers/documents.py. That way each feature owns its own instructions and langchain.py stays reusable.
@@ -55,6 +61,9 @@ cmd.exe /c start http://127.0.0.1:8000/docs
 Optional: open ReDoc
 cmd.exe /c start http://127.0.0.1:8000/redoc
 
+cd ~/Desktop/Retrieval-based-Voice-Conversion-WebUI
+source venv/Scripts/activate
+python infer-web.py
 
 
 

@@ -9,9 +9,12 @@ from __future__ import annotations
 import logging
 import os
 
+from tts.ssml import build_ssml
+
 logger = logging.getLogger(__name__)
 
 _AZURE_TTS_VOICE_DEFAULT = "mk-MK-MarijaNeural"
+_AZURE_TTS_LANGUAGE_DEFAULT = "mk-MK"
 
 
 def synthesize(text: str, voice: str | None = None) -> bytes:
@@ -34,6 +37,7 @@ def synthesize(text: str, voice: str | None = None) -> bytes:
     resolved_voice = voice or os.getenv("AZURE_TTS_VOICE", _AZURE_TTS_VOICE_DEFAULT)
 
     speech_config = speechsdk.SpeechConfig(subscription=key, region=region)
+    speech_config.speech_synthesis_language = _AZURE_TTS_LANGUAGE_DEFAULT
     speech_config.speech_synthesis_voice_name = resolved_voice
     # Riff24Khz16BitMonoPcm: standard WAV container, 24 kHz 16-bit mono PCM.
     # This format feeds directly into the RVC conversion stage without pre-resampling.
@@ -45,7 +49,10 @@ def synthesize(text: str, voice: str | None = None) -> bytes:
         speech_config=speech_config,
         audio_config=None,  # in-memory output — no speaker or file
     )
-    result = synthesizer.speak_text_async(text).get()
+    # Send SSML rather than plain text so the Bitola-dialect prosody envelope and
+    # <sub alias> word substitutions tuned in Audio Content Creation are applied.
+    ssml = build_ssml(text, resolved_voice)
+    result = synthesizer.speak_ssml_async(ssml).get()
 
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
         return bytes(result.audio_data)

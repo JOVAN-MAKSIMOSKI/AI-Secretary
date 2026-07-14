@@ -9,7 +9,6 @@ from decimal import Decimal
 def _get_configured_llm():
     """Instantiate an LLM based on existing RAG provider env settings."""
     llm_provider = os.getenv("RAG_LLM_PROVIDER", "auto").strip().lower()
-    llm_timeout_seconds = float(os.getenv("RAG_LLM_TIMEOUT_SECONDS", "60"))
 
     openai_api_key = os.getenv("RAG_OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
     anthropic_api_key = os.getenv("RAG_ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY", "")).strip()
@@ -23,13 +22,10 @@ def _get_configured_llm():
         elif anthropic_api_key:
             llm_provider = "anthropic"
         else:
-            llm_provider = "ollama"
-
-    if llm_provider == "ollama":
-        from llama_index.llms.ollama import Ollama
-
-        llm_model = os.getenv("RAG_LLM_MODEL", "qwen2.5")
-        return Ollama(model=llm_model, request_timeout=llm_timeout_seconds)
+            raise RuntimeError(
+                "No LLM provider configured: set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GITHUB_MODELS_TOKEN, "
+                "or set RAG_LLM_PROVIDER explicitly."
+            )
 
     if llm_provider == "openai":
         if not openai_api_key:

@@ -16,8 +16,8 @@ def run_diagnostics(question: str, top_k: int = 5):
     # 2. Check Environment Variables
     print("\n[1/4] Checking Configured Environment Variables:")
     print(f" -> RAG_LLM_PROVIDER:   {os.getenv('RAG_LLM_PROVIDER', 'auto (default)')}")
-    print(f" -> RAG_EMBED_PROVIDER: {os.getenv('RAG_EMBED_PROVIDER', 'ollama (default)')}")
-    print(f" -> RAG_EMBED_MODEL:    {os.getenv('RAG_EMBED_MODEL', 'nomic-embed-text (default)')}")
+    print(f" -> RAG_EMBED_PROVIDER: {os.getenv('RAG_EMBED_PROVIDER', 'huggingface (default)')}")
+    print(f" -> RAG_EMBED_MODEL:    {os.getenv('RAG_EMBED_MODEL', 'intfloat/multilingual-e5-large (default)')}")
     print(f" -> QDRANT_COLLECTION:  {os.getenv('QDRANT_COLLECTION', 'waste_management_law_mk_v2 (default)')}")
     
     # 3. Initialize Settings & Client using your code
@@ -43,7 +43,7 @@ def run_diagnostics(question: str, top_k: int = 5):
         print(f" -> Successfully generated vector dims: {len(query_vector)}")
     except Exception as e:
         print(f" -> Failed to generate embedding: {e}")
-        print("💡 Tip: Is your local Ollama running, or are your API keys correct?")
+        print("💡 Tip: Are your API keys correct, and is the embedding model downloaded?")
         return
 
     # 6. Query Qdrant directly to catch raw scores

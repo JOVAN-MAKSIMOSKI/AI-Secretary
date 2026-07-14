@@ -9,8 +9,9 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Iterable
 
-from langchain_community.llms import Ollama
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI
 
 
 _INTEGER_EXTRACTION_KEYS = {
@@ -57,6 +58,10 @@ _PROMPT_INJECTION_PATTERNS = [
 _DATE_ISO_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TIME_24H_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _CYRILLIC_PATTERN = re.compile(r"[\u0400-\u04FF]")
+
+# Calendar titles are capped to this many words so a long phrase \u2014 or a verbose model
+# reply \u2014 never becomes the meeting name. Keeps titles readable in the calendar UI.
+MAX_EVENT_NAME_WORDS = 4
 
 # Macedonian tokens stripped when extracting event_name from the raw message.
 _MK_BOOKING_VERBS = re.compile(
@@ -208,23 +213,57 @@ def _coerce_extracted_value(key: str, value: Any) -> Any:
 _EXTRACTION_TEMPERATURE = 0.0
 
 
-def get_ollama_llm():
-    """Initialize and return an Ollama LLM."""
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    model = os.getenv("OLLAMA_MODEL", "mistral")
+_GITHUB_MODELS_API_BASE = "https://models.inference.ai.azure.com"
 
-    return Ollama(
-        base_url=ollama_base_url,
-        model=model,
-        temperature=_EXTRACTION_TEMPERATURE,
-    )
+
+def get_extraction_llm() -> ChatOpenAI:
+    """Initialize the extraction LLM from the shared RAG_LLM_* provider settings."""
+    llm_provider = os.getenv("RAG_LLM_PROVIDER", "auto").strip().lower()
+    openai_api_key = os.getenv("RAG_OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
+    github_models_token = os.getenv("RAG_GITHUB_MODELS_TOKEN", os.getenv("GITHUB_MODELS_TOKEN", "")).strip()
+
+    if llm_provider == "auto":
+        if github_models_token:
+            llm_provider = "github"
+        elif openai_api_key:
+            llm_provider = "openai"
+        else:
+            raise RuntimeError(
+                "No LLM provider configured for extraction: set OPENAI_API_KEY or GITHUB_MODELS_TOKEN, "
+                "or set RAG_LLM_PROVIDER explicitly."
+            )
+
+    if llm_provider == "openai":
+        if not openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY (or RAG_OPENAI_API_KEY) is required for RAG_LLM_PROVIDER=openai")
+
+        return ChatOpenAI(
+            model=os.getenv("RAG_LLM_MODEL", "gpt-4.1-mini"),
+            api_key=openai_api_key,
+            temperature=_EXTRACTION_TEMPERATURE,
+        )
+
+    if llm_provider == "github":
+        if not github_models_token:
+            raise RuntimeError("GITHUB_MODELS_TOKEN (or RAG_GITHUB_MODELS_TOKEN) is required for RAG_LLM_PROVIDER=github")
+
+        return ChatOpenAI(
+            model=os.getenv("RAG_LLM_MODEL", "openai/gpt-4.1-mini"),
+            api_key=github_models_token,
+            base_url=_GITHUB_MODELS_API_BASE,
+            temperature=_EXTRACTION_TEMPERATURE,
+        )
+
+    raise RuntimeError(f"Unsupported RAG_LLM_PROVIDER for extraction: {llm_provider}")
 
 
 def create_simple_chain(prompt_template: str):
     """Create a simple LLM chain with a prompt template."""
-    llm = get_ollama_llm()
+    llm = get_extraction_llm()
     prompt = PromptTemplate.from_template(prompt_template)
-    return prompt | llm
+    # StrOutputParser keeps the chain returning plain text: callers parse the JSON body
+    # themselves, and a chat model would otherwise hand back an AIMessage.
+    return prompt | llm | StrOutputParser()
 
 
 def _normalize_extraction_output(
@@ -378,7 +417,7 @@ def _resolve_relative_event_date(message: str) -> str | None:
     if "today" in lowered:
         return today.isoformat()
 
-    # Macedonian relative dates resolved by Python so Ollama doesn't have to convert them.
+    # Macedonian relative dates resolved by Python so the model doesn't have to convert them.
     if re.search(r"\bутре\b", lowered):
         return (today + timedelta(days=1)).isoformat()
 
@@ -445,13 +484,17 @@ def _postprocess_calendar_extraction(message: str, extracted: dict[str, Any]) ->
     event_time = _normalize_event_time(normalized.get("event_time"))
     duration_raw = normalized.get("duration_minutes")
 
-    # For Macedonian (Cyrillic) messages, always derive event_name in Python by stripping
-    # booking verbs, date tokens, and time tokens from the raw message. Ollama reliably
-    # extracts date and time but cannot be trusted to isolate just the event title.
-    if _contains_cyrillic(message):
+    # Prefer the LLM-built title (it can normalize speech-to-text errors the regex strip
+    # cannot). Only fall back to the Python strip heuristic when the model returned no
+    # event_name at all, so a Cyrillic message still yields something usable.
+    if not event_name and _contains_cyrillic(message):
         recovered = _extract_cyrillic_event_name_fallback(message)
         if recovered:
             event_name = recovered
+
+    # Safety net: cap the title so a verbose model reply never becomes the meeting name.
+    if event_name:
+        event_name = " ".join(event_name.split()[:MAX_EVENT_NAME_WORDS])
 
     if not event_name:
         raise ValueError("Missing event_name in calendar extraction output.")
@@ -544,7 +587,15 @@ def run_invoice_extraction(
         "- Do not output fields that are not in the expected key list.\n"
         "- If message contains consignment note number, put it in consignment_note_number (not order_number).\n"
         "- If a value is missing or uncertain, omit that key.\n"
-        "- Do not include markdown fences or extra text.\n\n"
+        "- Do not include markdown fences or extra text.\n"
+        # Spoken amounts arrive as number words (Whisper transcribes Macedonian speech
+        # that way); without explicit examples the model omits units/price_per_unit
+        # entirely instead of converting them.
+        "- units, price_per_unit, tax_percentage, and all numbers must be numeric JSON values, never words.\n"
+        "- Convert number words in any language to digits, including Macedonian: "
+        "'пет' is 5, 'десет' is 10, 'сто' is 100, 'илјада' is 1000, "
+        "'две илјади и петстотини' is 2500.\n"
+        "- Example: 'пет парчиња по илјада денари' means units 5 and price_per_unit 1000.\n\n"
         "User message:\n{message}"
     )
 
@@ -583,7 +634,9 @@ def run_calendar_event_extraction(message: str) -> dict[str, Any]:
     has_cyrillic = _contains_cyrillic(message)
     language_hint = (
         "CRITICAL: The user is writing in Macedonian (Cyrillic script). "
-        "For event_name ONLY: copy the exact Cyrillic characters from the user message word for word — do NOT translate or change any letters. "
+        "For event_name: produce a SHORT title in Macedonian Cyrillic (do NOT translate to English), "
+        "at most 4 words, in the form '<activity> со <name>' — e.g. 'состанок со Стефан'. "
+        "Correct obvious speech-to-text errors and drop filler words, booking verbs, dates, and times. "
         "For event_date and event_time: still convert them to the required formats (YYYY-MM-DD and HH:MM) as normal.\n"
         if has_cyrillic
         else ""
@@ -604,7 +657,7 @@ def run_calendar_event_extraction(message: str) -> dict[str, Any]:
         "- Do not output keys outside the expected list.\n"
         "- If a key is missing or uncertain, omit it.\n"
         "- Do not include markdown fences or extra text.\n"
-        "- event_name: extract only the meeting or event title/description from the message — exclude the booking command verb, the date, and the time. Preserve the original language and script without translating.\n"
+        "- event_name: a concise title of at most 4 words — an activity plus the participant (e.g. 'состанок со Стефан'). Exclude the booking verb, the date, and the time. Keep the user's language and script without translating.\n"
         "- event_date: always output in YYYY-MM-DD format, converting any date expression the user wrote.\n"
         "- event_time: always output in HH:MM 24-hour format, converting any time expression the user wrote.\n\n"
         "User message:\n{message}"
