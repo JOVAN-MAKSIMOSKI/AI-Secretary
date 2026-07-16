@@ -8,7 +8,10 @@ import { prisma } from '../lib/prisma.js';
 import { writeAuditLog } from '../repository/auditLogs.js';
 import type { TenantWasteProfile } from '@secretary/shared-types';
 
-const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
+// PY_SERVICE_URL is the canonical var (zod-validated in lib/env.ts); the legacy
+// PYTHON_SERVICE_URL name is kept as a fallback so older env files keep working.
+const PYTHON_SERVICE_URL =
+  process.env.PY_SERVICE_URL || process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
 const WASTE_LAW_TOP_K = 10;
 
 export interface WasteLawChatMessage {

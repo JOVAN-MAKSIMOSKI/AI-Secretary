@@ -171,6 +171,11 @@ const allowedOrigins = (process.env.AGENT_CORS_ALLOW_ORIGINS || 'http://localhos
 
 const app = express();
 
+// Behind the Caddy reverse proxy in production: trust exactly one proxy hop so
+// req.ip reflects the real client (X-Forwarded-For) instead of Caddy's container
+// IP — otherwise express-rate-limit would throttle all clients as one.
+app.set('trust proxy', 1);
+
 app.use(helmet());
 
 app.use(

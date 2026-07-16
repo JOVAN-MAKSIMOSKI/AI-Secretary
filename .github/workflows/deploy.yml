@@ -1,0 +1,114 @@
+# CI/CD: build both service images and push to GHCR on every push to main or test.
+# Deploy (SSH to the VPS) runs for main only — the test branch has no server yet
+# (dockerdeploymentplan.md Phase 9). Rollback: IMAGE_TAG=<previous-sha> docker compose up -d.
+name: deploy
+
+on:
+  push:
+    branches: [main, test]
+
+jobs:
+  # Quality gate — nothing is built or deployed unless this passes.
+  # No unit-test suites exist yet; when they do, run them here (agent: node --test,
+  # python: uv run pytest) so a failing test blocks the deploy.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # corepack reads the packageManager pin from root package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile --filter agent...
+      - name: Type-check agent (tsc strict, no emit)
+        run: pnpm --filter agent type-check
+
+      - uses: astral-sh/setup-uv@v5
+      - name: Sync python env exactly from uv.lock
+        run: uv sync --frozen
+        working-directory: apps/python
+      - name: Syntax-check python service
+        run: uv run python -m compileall -q main.py routers services models scripts
+        working-directory: apps/python
+
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR image names must be lowercase; the repository owner is
+      # JOVAN-MAKSIMOSKI, so ${{ github.repository_owner }} cannot be used
+      # directly in image tags.
+      - name: Set image tag and lowercase owner
+        id: vars
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=test-${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Agent context is the repo root: the build needs pnpm-workspace.yaml
+      # and packages/shared-types alongside apps/agent.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/agent/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.vars.outputs.owner }}/ai-secretary-agent:${{ steps.vars.outputs.tag }}
+            ghcr.io/${{ steps.vars.outputs.owner }}/ai-secretary-agent:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/python
+          file: apps/python/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.vars.outputs.owner }}/ai-secretary-python:${{ steps.vars.outputs.tag }}
+            ghcr.io/${{ steps.vars.outputs.owner }}/ai-secretary-python:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.ref_name == 'main' # test branch stops after build — no deploy target yet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: deploy
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/ai-secretary && docker compose pull && docker compose up -d && docker image prune -f
+
+      # Post-deploy smoke check: fails the workflow loudly if either service is
+      # not answering over TLS after the deploy. Runs only once the repository
+      # variables (Settings -> Secrets and variables -> Actions -> Variables)
+      # AGENT_PUBLIC_URL / PYTHON_PUBLIC_URL are set, i.e. once a domain exists.
+      - name: Smoke check agent /healthz
+        if: vars.AGENT_PUBLIC_URL != ''
+        run: curl -fsS --retry 10 --retry-delay 15 --retry-all-errors "${{ vars.AGENT_PUBLIC_URL }}/healthz"
+
+      - name: Smoke check python /healthz
+        if: vars.PYTHON_PUBLIC_URL != ''
+        run: curl -fsS --retry 10 --retry-delay 15 --retry-all-errors "${{ vars.PYTHON_PUBLIC_URL }}/healthz"

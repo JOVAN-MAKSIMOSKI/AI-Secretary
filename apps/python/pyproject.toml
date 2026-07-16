@@ -198,3 +198,15 @@ dependencies = [
 # version already installed so `uv sync` never needs to swap its DLLs while
 # the service is running (they are locked by the loaded process on Windows).
 constraint-dependencies = ["pywin32==311"]
+
+# Linux (Docker) resolves torch from PyTorch's CPU-only wheel index — the
+# deployment VPS has no GPU, and the default CUDA wheels would drag ~10 GB of
+# nvidia-* libraries into the image. The sys_platform marker leaves Windows
+# dev resolution untouched.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]

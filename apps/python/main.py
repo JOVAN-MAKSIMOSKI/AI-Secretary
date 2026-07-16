@@ -86,6 +86,14 @@ app.add_middleware(
 	allow_headers=["*"],
 )
 
+# Unauthenticated liveness probe for the Docker HEALTHCHECK — mirrors the
+# agent's GET /healthz. Registered only once the lifespan warmup has finished,
+# because uvicorn does not accept connections until startup completes.
+@app.get("/healthz")
+async def healthz():
+	return {"ok": True, "service": "python"}
+
+
 app.include_router(business_router)
 app.include_router(clients_router)
 app.include_router(documents_router)

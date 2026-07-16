@@ -21,7 +21,14 @@ from llama_index.core import Settings, VectorStoreIndex
 from qdrant_client import QdrantClient
 
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+# parents[3] is the repo root only on a dev checkout (<repo>/apps/python/services/…).
+# In the Docker image this module sits at /app/services/… with no repo root above it,
+# and indexing past the filesystem root raises IndexError at import time — fall back
+# to a path near the module; containers always set QDRANT_URL so it is never used.
+try:
+	_REPO_ROOT = Path(__file__).resolve().parents[3]
+except IndexError:
+	_REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_LOCAL_QDRANT_PATH = _REPO_ROOT / "apps" / "agent" / "src" / "rag-agent" / "qdrant_data"
 
 _PROMPT_INJECTION_PATTERNS: list[re.Pattern[str]] = [
