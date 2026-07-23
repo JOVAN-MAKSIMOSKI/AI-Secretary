@@ -6,11 +6,15 @@ name: deploy
 on:
   push:
     branches: [main, test]
+  # Gate pull requests too — otherwise a broken chain is only caught once it is
+  # already on main, which is too late to be worth gating.
+  pull_request:
+    branches: [main, test]
 
 jobs:
   # Quality gate — nothing is built or deployed unless this passes.
-  # No unit-test suites exist yet; when they do, run them here (agent: node --test,
-  # python: uv run pytest) so a failing test blocks the deploy.
+  # Because `build` needs `check` and `deploy` needs `build`, a failing eval here
+  # blocks the deploy with no extra gating logic.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -26,6 +30,14 @@ jobs:
       - name: Type-check agent (tsc strict, no emit)
         run: pnpm --filter agent type-check
 
+      # Step order is deliberate: every free deterministic check runs before the one
+      # step that spends money, so a broken build never buys API calls to find out.
+
+      # Gate A — offline, no credentials. Chain routing coverage, plus pure calendar
+      # payload validation and local-time arithmetic.
+      - name: Eval gate A — routing coverage + handler logic (offline)
+        run: pnpm --filter agent eval:offline
+
       - uses: astral-sh/setup-uv@v5
       - name: Sync python env exactly from uv.lock
         run: uv sync --frozen
@@ -34,8 +46,45 @@ jobs:
         run: uv run python -m compileall -q main.py routers services models scripts
         working-directory: apps/python
 
+      # Gate A (python half) — prompt-injection guards for the waste-law RAG corpus.
+      # Pure functions: no Qdrant, no model load, no network, ~2s.
+      - name: Eval gate A — python RAG injection guards
+        run: uv run pytest -q
+        working-directory: apps/python
+
+      # Gate C — two paid python evals, each with its own self-skip:
+      #  - retrieval recall: skips (~2s, no model load) unless a Qdrant collection is
+      #    reachable — it is not in CI today (qdrant_data/ is gitignored, e5-large is
+      #    ~2GB). Enabling it later means setting QDRANT_URL, not editing this file,
+      #    plus a cached or hosted embedding model.
+      #  - extraction field accuracy (layer 1): runs whenever EVALAPIKEY is present.
+      #    Calls the extraction chains directly — no FastAPI boot, no Supabase (the
+      #    eval passes owner_auth_id=None, and eval_env.py sets import-guard values).
+      - name: Eval gate C — retrieval recall + extraction accuracy
+        env:
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_COLLECTION: ${{ vars.QDRANT_COLLECTION }}
+          EVALAPIKEY: ${{ secrets.EVALAPIKEY }}
+        run: uv run pytest evals/ -q
+        working-directory: apps/python
+
+      # Gate B — live routing accuracy against the committed baseline in
+      # src/evals/baseline.json. Runs last because it is the only step that costs
+      # money. Self-skips when EVALAPIKEY is absent, so forks and secretless runs
+      # degrade to Gate A rather than failing for a reason unrelated to code quality.
+      # configureEvalEnv() pins the provider to openai and clears the free-tier
+      # tokens, so nothing else needs setting here.
+      - name: Eval gate B — live routing accuracy
+        env:
+          EVALAPIKEY: ${{ secrets.EVALAPIKEY }}
+          ROUTER_LLM_MODEL: ${{ vars.ROUTER_LLM_MODEL }}
+        run: pnpm --filter agent eval:routing
+
   build:
     needs: check
+    # Pull requests stop after `check` — a PR gets the eval gate, not a pushed image.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read

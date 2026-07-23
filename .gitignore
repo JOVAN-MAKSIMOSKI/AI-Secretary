@@ -44,3 +44,5 @@ supabase/.temp/
 
 # VS Code workspace files are per-machine editor state
 *.code-workspace
+
+documentation.txt

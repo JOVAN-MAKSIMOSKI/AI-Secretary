@@ -36,7 +36,16 @@ _PROMPT_INJECTION_PATTERNS: list[re.Pattern[str]] = [
 	re.compile(r"disregard\s+(the\s+)?(system|developer|safety)\s+instructions?", re.IGNORECASE),
 	re.compile(r"reveal\s+(the\s+)?(system|developer)\s+prompt", re.IGNORECASE),
 	re.compile(r"you\s+are\s+now\s+(an?|the)", re.IGNORECASE),
-	re.compile(r"act\s+as\s+(an?|the)", re.IGNORECASE),
+	# "act as a/an/the" only counts as injection when it is aimed at the assistant —
+	# either imperative ("Act as a system administrator") or addressed to it ("you must
+	# act as ..."). Bare "act as a" is ordinary waste-law vocabulary: asking whether a
+	# company may "act as a waste collector" is a legitimate question and matching it
+	# here rejected real users outright.
+	re.compile(
+		r"(?:^|[.!?]\s*)act\s+as\s+(?:an?|the)\b"
+		r"|\byou\s+(?:must|should|will|shall|now|are\s+to)?\s*act\s+as\s+(?:an?|the)\b",
+		re.IGNORECASE,
+	),
 	re.compile(r"jailbreak|do\s+anything\s+now|dan\b", re.IGNORECASE),
 	re.compile(r"tool\s*call|function\s*call", re.IGNORECASE),
 	re.compile(r"<(system|assistant|developer)>|```(system|assistant|developer)", re.IGNORECASE),

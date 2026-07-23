@@ -184,6 +184,34 @@ logger.info(
 
 ---
 
+## Tests and Evals
+
+pytest is configured in `pyproject.toml` (`[tool.pytest.ini_options]`, `pythonpath=["."]`
+so tests import `services.*` the way the app does). Two separate suites:
+
+```bash
+uv run pytest -q          # fast guards — pure functions, ~2s, runs in CI on every push
+uv run pytest evals/ -q   # paid/heavy evals: retrieval (needs Qdrant + e5 model) and
+                          # extraction accuracy (needs EVALAPIKEY; ~20s, real LLM calls)
+```
+
+- `tests/` — pure-function guards only. No Qdrant, no model load, no network. Keep it
+  fast; it is the half that gates every push.
+- `evals/` — the waste-law retrieval eval. Scored as recall@k against
+  `evals/baseline.json`, with golden cases in `evals/golden/retrieval.jsonl`. Self-skips
+  when no Qdrant collection is reachable, so CI degrades to a skip rather than a failure.
+
+When adding a retrieval case, author it against measured output and skip questions whose
+correct source is genuinely ambiguous — several laws carry penalty and reporting
+provisions, so a single `expect_law` for those would test nothing.
+
+**Windows note:** local Qdrant (path mode) needs `pywin32` wired onto `sys.path`. uv
+installs the wheel but does not run pywin32's postinstall, so
+`.venv/Lib/site-packages/pywin32.pth` must exist containing `win32`, `win32\lib`, and
+`Pythonwin`. Without it `import pywintypes` fails and local Qdrant cannot open at all.
+
+---
+
 ## Type Generation for TypeScript
 
 When route schemas change, regenerate TypeScript types:

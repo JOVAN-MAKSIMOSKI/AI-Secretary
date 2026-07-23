@@ -193,6 +193,12 @@ dependencies = [
 # dependency tree is too heavy to lock into every deploy. Install manually when
 # needed: uv pip install rvc-python
 
+[tool.pytest.ini_options]
+# pythonpath="." so tests import `services.*` the same way the app does; without it
+# pytest puts only tests/ on sys.path and every service import fails.
+pythonpath = ["."]
+testpaths = ["tests"]
+
 [tool.uv]
 # pywin32 is portalocker's Windows-only transitive dep. Constrained to the
 # version already installed so `uv sync` never needs to swap its DLLs while

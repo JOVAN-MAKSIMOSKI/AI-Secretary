@@ -639,7 +639,16 @@ def run_calendar_event_extraction(message: str) -> dict[str, Any]:
         "Correct obvious speech-to-text errors and drop filler words, booking verbs, dates, and times. "
         "For event_date and event_time: still convert them to the required formats (YYYY-MM-DD and HH:MM) as normal.\n"
         if has_cyrillic
-        else ""
+        # Without an equally explicit instruction here, event_name has drifted into a
+        # third language (observed: Russian for an English message) instead of staying
+        # in the message's own language — the generic "keep the user's language" rule
+        # in the shared instructions below was not forceful enough on its own.
+        else (
+            "CRITICAL: The user is writing in English (Latin script). "
+            "For event_name: produce a SHORT title in English, at most 4 words, in the "
+            "form '<activity> with <name>' — e.g. 'meeting with Stefan'. "
+            "Do NOT translate any word to another language.\n"
+        )
     )
 
     prompt_template = (

@@ -81,3 +81,8 @@ e — open the file in your editor to review before decidingd
 
 
 9PXAHY82ZS6PPHUG3MPYRGU9
+
+1. In your registrar's DNS panel, create two A records: api → <VPS IP> and py → <VPS IP>. (An A record simply maps a name to an IPv4 address.) Wait for propagation — usually minutes; verify with nslookup api.yourdomain.com.
+2. Replace YOURDOMAIN.com in deploy/Caddyfile and copy it to the VPS.
+3. Start the stack. That's it for certificates — this is the "authentication" part, and it's fully automatic: Caddy contacts Let's Encrypt, which challenges it to prove control of the domain (Let's Encrypt makes an HTTP request to api.yourdomain.com — which lands on your VPS because of the A record — and Caddy answers it). Certificates are issued in seconds, stored in the caddy_data volume, and renewed automatically forever. You never handle certificate files or pay anything.
+4. Update the config that embeds the domain: AGENT_PUBLIC_URL and GOOGLE_REDIRECT_URL in agent.env; add the new redirect URL in the Google Cloud Console OAuth client (that one is a manual "authenticate the domain with a third party" step); repoint the Twilio voice webhook to https://api.yourdomain.com/...; and set VITE_AGENT_API_BASE_URL / VITE_PYTHON_API_BASE_URL in Vercel's project settings.

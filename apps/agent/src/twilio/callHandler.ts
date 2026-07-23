@@ -16,7 +16,7 @@ import { resolveChainWithLlm } from '../agent/nodes/llmResolver.js';
 import { getChainRegistry, type ChainId } from '../agent/nodes/chainRegistry.js';
 import { createCalendarEvent } from '../mcp/calendar.js';
 import { GmailReconnectRequiredError } from '../lib/gmailOAuth.js';
-import { z } from 'zod';
+import { calendarExtractionSchema } from '../agent/calendarTime.js';
 import {
   getOrCreateCallState,
   getCallState,
@@ -66,15 +66,6 @@ const VOICE_SYSTEM_PROMPT =
 
 // const YES_PATTERNS = /^(да|yes|потврди|точно|јас|ok|okay)\b/i;
 // const NO_PATTERNS = /^(не|no|откажи|cancel|стоп|stop)\b/i;
-
-const calendarExtractionSchema = z
-  .object({
-    event_name: z.string().min(1),
-    event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    event_time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
-    duration_minutes: z.number().int().min(1).max(480).optional().default(15),
-  })
-  .strict();
 
 // --- Helpers ---
 

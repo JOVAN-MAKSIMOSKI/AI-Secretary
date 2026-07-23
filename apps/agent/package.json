@@ -9,7 +9,9 @@
     "start": "node dist/server.js",
     "lint": "eslint src",
     "type-check": "tsc --noEmit",
-    "test:resolver": "tsx --test src/agent/nodes/llmResolver.test.ts"
+    "eval:coverage": "tsx src/evals/coverage.ts",
+    "eval:offline": "tsx --test src/evals/offline.eval.ts src/evals/handlerLogic.eval.ts",
+    "eval:routing": "tsx --test src/evals/routing.eval.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

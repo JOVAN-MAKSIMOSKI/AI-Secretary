@@ -1,0 +1,8 @@
+{
+  "_comment": "Committed contract for the extraction eval. Measured 2026-07-23 on openai/gpt-4.1-mini (chain default), identical across two consecutive runs after the calendar-prompt fix: invoice 21/21 = 1.000, calendar 10/10 = 1.000, offer 5/5 = 1.000. The prior 0.75 calendar floor absorbed a reproducible defect where the chain emitted event_name in the wrong language (Russian, for an English message) because only the Cyrillic branch of the calendar prompt's language_hint had an explicit language instruction; the English branch now has an equally explicit one. Raising a floor after a green run locks the gain in; lowering one accepts a regression and must be its own reviewable diff.",
+  "perChainFieldAccuracy": {
+    "invoice": 0.9,
+    "calendar": 0.9,
+    "offer": 0.75
+  }
+}
