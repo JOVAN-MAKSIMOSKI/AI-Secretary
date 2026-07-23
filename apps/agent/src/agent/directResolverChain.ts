@@ -1,10 +1,18 @@
 import { getChainRegistry, type ChainId } from './nodes/chainRegistry.js';
 import { resolveChainWithLlm } from './nodes/llmResolver.js';
-import { z } from 'zod';
+import { runWasteLawChain } from './wasteLawChain.js';
+import {
+  addMinutesToLocalDateTime,
+  buildLocalDateTime,
+  calendarExtractionSchema,
+} from './calendarTime.js';
 
 import { createCalendarEvent } from '../mcp/calendar.js';
 
-const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
+// PY_SERVICE_URL is the canonical var (zod-validated in lib/env.ts); the legacy
+// PYTHON_SERVICE_URL name is kept as a fallback so older env files keep working.
+const PYTHON_SERVICE_URL =
+  process.env.PY_SERVICE_URL || process.env.PYTHON_SERVICE_URL || 'http://127.0.0.1:8000';
 
 type DirectResolverResult = {
   chainId: ChainId;
@@ -14,49 +22,6 @@ type DirectResolverResult = {
   handlerResult: Record<string, unknown>;
 };
 
-const calendarExtractionSchema = z
-  .object({
-    event_name: z.string().min(1),
-    event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    event_time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
-    duration_minutes: z.number().int().min(1).max(480).optional().default(15),
-  })
-  .strict();
-
-const CALENDAR_DEFAULT_DURATION_MINUTES = Number(process.env.CALENDAR_DEFAULT_DURATION_MINUTES || 15);
-
-function buildLocalDateTime(dateIso: string, time24h: string): string {
-  return `${dateIso}T${time24h}:00`;
-}
-
-function addMinutesToLocalDateTime(localDateTime: string, minutes: number): string {
-  const match = localDateTime.match(
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/,
-  );
-  if (!match) {
-    throw new Error('Invalid local datetime format.');
-  }
-
-  const [, year, month, day, hour, minute, second] = match;
-  const baseUtcMs = Date.UTC(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour),
-    Number(minute),
-    Number(second),
-  );
-
-  const shifted = new Date(baseUtcMs + minutes * 60_000);
-  const y = shifted.getUTCFullYear();
-  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(shifted.getUTCDate()).padStart(2, '0');
-  const h = String(shifted.getUTCHours()).padStart(2, '0');
-  const min = String(shifted.getUTCMinutes()).padStart(2, '0');
-  const sec = String(shifted.getUTCSeconds()).padStart(2, '0');
-
-  return `${y}-${m}-${d}T${h}:${min}:${sec}`;
-}
 
 async function callPythonExtraction(
   endpointPath: string,
@@ -113,7 +78,8 @@ export async function runDirectResolverChain(input: {
           break;
         }
 
-        const durationMinutes = parsed.data.duration_minutes ?? CALENDAR_DEFAULT_DURATION_MINUTES;
+        // duration_minutes is always present: the schema applies .default(15).
+        const durationMinutes = parsed.data.duration_minutes;
         const startTimeLocal = buildLocalDateTime(parsed.data.event_date, parsed.data.event_time);
         let endTimeLocal: string;
         try {
@@ -148,6 +114,21 @@ export async function runDirectResolverChain(input: {
                 : 'Failed to book meeting due to an unknown error.',
           };
         }
+      }
+      break;
+    case 'waste_law_query':
+      {
+        // History is intentionally empty on this path — the dashboard chat is
+        // stateless. The law questions page uses the dedicated
+        // POST /agent/waste-law/chat route, which passes its own history.
+        const wasteLawResult = await runWasteLawChain({
+          tenantId: input.tenantId,
+          userAuthId: input.userAuthId,
+          accessToken: input.accessToken,
+          message: input.message,
+          history: [],
+        });
+        handlerResult = { success: true, answer: wasteLawResult.answer };
       }
       break;
     default:

@@ -9,7 +9,7 @@ from decimal import Decimal
 import logging
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form, File
+from fastapi import APIRouter, Depends, Header, HTTPException, status, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
 from postgrest.exceptions import APIError
 
@@ -24,15 +24,19 @@ from services.invoices.excel import (
     render_invoice_template_bytes,
 )
 from services.invoices.invoice_text import amount_to_macedonian_text
-from services.auth import get_current_user_id
+from services.auth import get_current_user_id, get_current_user_id_or_service
 from services.storage import (
     supabase,
+    upload_invoice_document,
     upload_template_document,
 )
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
 _UNKNOWN_COLUMN_PATTERN = re.compile(r"Could not find the '([^']+)' column", re.IGNORECASE)
+# Matches the compressed-size cap enforced by validate_ooxml; used to abort an oversized
+# template upload before it is fully buffered into memory.
+_TEMPLATE_MAX_BYTES = 10 * 1024 * 1024
 
 
 def _extract_unknown_column_name(exc: Exception) -> str | None:
@@ -64,7 +68,13 @@ def _insert_invoice_with_schema_fallback(insert_data: dict[str, Any]) -> None:
             if unknown_column is None or unknown_column not in payload:
                 raise
 
-            # Handle schema drift between deployed PostgREST schema and local code.
+            # Schema drift: the deployed DB is behind the local Prisma schema.
+            # Log loudly so this is never silent.
+            logger.warning(
+                "Schema drift detected — dropping unknown column '%s' from invoice INSERT. "
+                "Apply the pending Prisma migration to fix this.",
+                unknown_column,
+            )
             payload.pop(unknown_column, None)
 
 
@@ -90,7 +100,12 @@ def _update_invoice_with_schema_fallback(
             if unknown_column is None or unknown_column not in payload:
                 raise
 
-            # Handle schema drift between deployed PostgREST schema and local code.
+            # Schema drift: the deployed DB is behind the local Prisma schema.
+            logger.warning(
+                "Schema drift detected — dropping unknown column '%s' from invoice UPDATE. "
+                "Apply the pending Prisma migration to fix this.",
+                unknown_column,
+            )
             payload.pop(unknown_column, None)
 
 
@@ -121,7 +136,7 @@ def _increment_business_invoice_counter(owner_auth_id: str) -> None:
 @router.post("/extract", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
 def extract_from_raw_message(
     payload: ExtractionRequest,
-    current_user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id_or_service),
 ) -> ExtractionResponse:
     """Run the LangChain extraction chain against the raw message text."""
     try:
@@ -152,7 +167,7 @@ def extract_from_raw_message(
 @router.post("/extract-calendar", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
 def extract_calendar_from_raw_message(
     payload: ExtractionRequest,
-    current_user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id_or_service),
 ) -> ExtractionResponse:
     """Run the calendar extraction chain against the raw message text."""
     try:
@@ -180,7 +195,7 @@ def extract_calendar_from_raw_message(
 @router.post("/extract-offer", response_model=ExtractionResponse, status_code=status.HTTP_200_OK)
 def extract_offer_from_raw_message(
     payload: ExtractionRequest,
-    current_user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id_or_service),
 ) -> ExtractionResponse:
     """Run the offer extraction chain against the raw message text."""
     try:
@@ -226,7 +241,8 @@ def _parse_optional_due_date(raw_due_date: Optional[str]) -> Optional[datetime]:
 @router.post("/invoice", status_code=status.HTTP_200_OK)
 def create_invoice(
     payload: Optional[InvoiceRequest] = None,
-    current_user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id_or_service),
+    x_invoice_origin: str = Header(default="manual"),
 ) -> StreamingResponse:
     """Fetch the stored invoice template bytes and stream them back."""
     owner_auth_id_str = str(UUID(current_user_id))
@@ -246,6 +262,9 @@ def create_invoice(
         )
     resolved_owner_auth_id = business.data[0]["owner_auth_id"]
     rendered_template_bytes: bytes | None = None
+    # Tracks whether this request inserted a brand-new invoice row (vs. updating an
+    # existing one). Only a row we created here may be rolled back on upload failure.
+    inserted_new_invoice = False
 
     if payload is not None:
         client_result = (
@@ -326,21 +345,29 @@ def create_invoice(
         existing_rows = existing_invoice.data or []
         if existing_rows:
             invoice_id = existing_rows[0]["id"]
+            update_data = dict(invoice_common_data)
+            # If the invoice is being re-generated via a voice call, stamp it so it
+            # appears in the dashboard's "Call Invoices" card regardless of its previous origin.
+            if x_invoice_origin == "call":
+                update_data["origin"] = "call"
             _update_invoice_with_schema_fallback(
                 invoice_id=invoice_id,
                 tenant_id=resolved_owner_auth_id,
-                update_data=invoice_common_data,
+                update_data=update_data,
             )
         else:
             invoice_id = str(uuid4())
             storage_path = f"{resolved_owner_auth_id}/invoices/{invoice_id}.xlsx"
+            origin = x_invoice_origin if x_invoice_origin in ("manual", "call") else "manual"
             insert_data = {
                 "id": invoice_id,
                 "storagePath": storage_path,
+                "origin": origin,
                 **invoice_common_data,
             }
             _insert_invoice_with_schema_fallback(insert_data)
             _increment_business_invoice_counter(resolved_owner_auth_id)
+            inserted_new_invoice = True
 
         business_values = fetch_business_values(resolved_owner_auth_id)
         invoice_render_values = {
@@ -386,6 +413,38 @@ def create_invoice(
             template_payload["template_bytes"],
             invoice_render_values,
         )
+        try:
+            upload_invoice_document(resolved_owner_auth_id, invoice_id, rendered_template_bytes)
+        except Exception as exc:
+            # Twilio voice invoices are only persisted in the cloud — there is no browser
+            # download to fall back on, so a failed upload must surface loudly instead of
+            # silently leaving the DB row pointing at a missing file. Manual (web) invoices
+            # still stream the file back, so a best-effort upload is acceptable there.
+            if x_invoice_origin == "call":
+                logger.exception("Storage upload failed for voice invoice %s", invoice_id)
+                # Delete the row we just inserted so it cannot linger as a "ghost" invoice
+                # pointing at a file that was never stored. We deliberately do NOT decrement
+                # the business invoice counter — leaving a gap in numbering is harmless, while
+                # rolling it back could collide with a concurrent invoice's number.
+                if inserted_new_invoice:
+                    try:
+                        (
+                            supabase.table("invoices")
+                            .delete()
+                            .eq("id", invoice_id)
+                            .eq("tenant_id", resolved_owner_auth_id)
+                            .execute()
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to roll back ghost invoice row %s after upload failure",
+                            invoice_id,
+                        )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Invoice {invoice_id} was generated but could not be saved to storage.",
+                ) from exc
+            logger.exception("Storage upload failed for invoice %s — continuing with stream", invoice_id)
 
     filename = f"{template_payload['template_name']}.xlsx"
     return StreamingResponse(
@@ -474,9 +533,22 @@ def create_template(
         )
     owner_auth_id = business.data[0]["owner_auth_id"]
 
-    # Generate template ID and read file
+    # Generate template ID and read file.
+    # Read in chunks and abort once the cap is exceeded, so an oversized upload never
+    # gets fully buffered into memory before validate_ooxml runs.
     template_id = str(uuid4())
-    file_content = file.file.read()
+    file_bytes = bytearray()
+    while True:
+        chunk = file.file.read(1024 * 1024)
+        if not chunk:
+            break
+        file_bytes.extend(chunk)
+        if len(file_bytes) > _TEMPLATE_MAX_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large. Maximum {_TEMPLATE_MAX_BYTES // (1024 * 1024)} MB.",
+            )
+    file_content = bytes(file_bytes)
 
     try:
         validate_ooxml(file_content)

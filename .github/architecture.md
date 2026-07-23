@@ -73,8 +73,9 @@ secretary/
 │   │   │   ├── documents.py
 │   │   │   ├── rag.py
 │   │   │   └── stt.py
-│   │   ├── requirements.txt
-│   │   └── venv/
+│   │   ├── pyproject.toml
+│   │   ├── uv.lock
+│   │   └── .venv/
 │   │
 │   └── web/                           # React — Vite frontend
 │       ├── src/

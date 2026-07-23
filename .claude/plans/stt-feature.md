@@ -204,7 +204,7 @@ Receives audio buffer from Express, forwards to Python as multipart, returns tra
 
 ```typescript
 import FormData from "form-data";
-import { logger } from "@secretary/logger";
+import { logger } from "../lib/logger.js";
 
 const PY_SERVICE_URL = process.env.PY_SERVICE_URL ?? "http://localhost:8000";
 const STT_TIMEOUT_MS = 30_000;

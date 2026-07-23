@@ -7,6 +7,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
+    // Prevents @twilio/voice-sdk from pulling in a second React instance.
+    dedupe: ['react', 'react-dom'],
   },
   server: {
     port: 5174,
@@ -16,9 +18,10 @@ export default defineConfig({
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline'",
         "style-src 'self' 'unsafe-inline'",
-        "connect-src 'self' https://*.supabase.co wss://*.supabase.co http://localhost:3000 http://localhost:8000",
+        "connect-src 'self' https://*.supabase.co wss://*.supabase.co http://localhost:3000 http://localhost:8000 https://*.twilio.com wss://*.twilio.com",
         "img-src 'self' data: blob:",
-        "font-src 'self'",
+        "font-src 'self' data:",
+        "media-src 'self' https://*.twilio.com blob:",
         "frame-ancestors 'none'",
       ].join('; '),
     },

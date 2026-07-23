@@ -2,12 +2,22 @@
 // CSRF: All state-changing routes require Authorization: Bearer, which browsers
 // cannot send cross-origin without a CORS preflight — no additional CSRF token is needed.
 import 'dotenv/config';
+import { validateAgentEnv } from './lib/env.js';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { rateLimit } from 'express-rate-limit';
 import multer from 'multer';
 import { transcribeAudio } from './tools/sttTool.js';
+import { validateTwilioSignature } from './twilio/twilioAuth.js';
+import { generateWebRtcToken } from './twilio/tokenService.js';
+import {
+	handleVoiceEntry,
+	handleRecording,
+	handleProcessingPoll,
+	handleCallStatus,
+	serveAudio,
+} from './twilio/callHandler.js';
 import {
 	buildGmailConnectUrl,
 	completeGmailOAuthCallback,
@@ -17,8 +27,10 @@ import {
 	GmailReconnectRequiredError,
 } from './lib/gmailOAuth.js';
 import { runDirectResolverChain } from './agent/directResolverChain.js';
+import { runWasteLawChain, runWasteLawChainStream, type WasteLawChatMessage } from './agent/wasteLawChain.js';
 import { createCalendarEvent, deleteCalendarEvent, listCalendarEvents } from './mcp/calendar.js';
-import { getGmailInboxStats } from './mcp/gmail.js';
+import { getGmailInboxStats, getDocumentBuffer } from './mcp/gmail.js';
+import JSZip from 'jszip';
 import { supabase } from './lib/supabase.js';
 import { writeAuditLog } from './repository/auditLogs.js';
 import { logger } from './lib/logger.js';
@@ -43,6 +55,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_TITLE_LENGTH = 500;
 const MAX_NOTES_LENGTH = 5_000;
 const MAX_MESSAGE_LENGTH = 10_000;
+const MAX_LAW_CHAT_HISTORY_MESSAGES = 50;
+// Matches the Python LawChatRequest ChatMessage content cap — anything longer
+// would 422 downstream, so truncate here instead of failing the request
+const MAX_LAW_CHAT_HISTORY_CONTENT_LENGTH = 8_000;
 const AUDIO_MAX_SIZE_BYTES = 25 * 1024 * 1024;
 const ALLOWED_AUDIO_MIMES = new Set([
 	'audio/webm',
@@ -144,12 +160,21 @@ function redirectWithResult(returnTo: string | undefined, statusValue: 'success'
 
 // --- App setup ---
 
+// Fail the boot with one aggregated error if required env vars are missing or
+// malformed, rather than throwing lazily the first time STT or OAuth is used.
+validateAgentEnv();
+
 const allowedOrigins = (process.env.AGENT_CORS_ALLOW_ORIGINS || 'http://localhost:5174')
 	.split(',')
 	.map((o) => o.trim())
 	.filter(Boolean);
 
 const app = express();
+
+// Behind the Caddy reverse proxy in production: trust exactly one proxy hop so
+// req.ip reflects the real client (X-Forwarded-For) instead of Caddy's container
+// IP — otherwise express-rate-limit would throttle all clients as one.
+app.set('trust proxy', 1);
 
 app.use(helmet());
 
@@ -167,6 +192,9 @@ app.use(
 );
 
 app.use(express.json({ limit: '1mb' }));
+// Twilio webhooks POST application/x-www-form-urlencoded; without this, req.body is
+// empty and Twilio signature validation fails with 403 on every /calls/* route.
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
 const globalLimiter = rateLimit({
 	windowMs: 60_000,
@@ -318,15 +346,15 @@ app.get('/gmail/inbox/stats', requireAuth, async (req: AuthenticatedRequest, res
 		const stats = await getGmailInboxStats(tenantId, userAuthId);
 		res.json({ ...stats, connected: true });
 	} catch (error) {
-		// Return 200 for expected "not available" states so the dashboard never logs a console error.
+		// Always return 200 with connected:false so the dashboard never logs a console error.
+		// Log unexpected errors server-side but never surface them to the client.
 		if (
-			error instanceof GmailReconnectRequiredError ||
-			(error instanceof Error && error.message.includes('No tenant/business'))
+			!(error instanceof GmailReconnectRequiredError) &&
+			!(error instanceof Error && error.message.includes('No tenant/business'))
 		) {
-			res.json({ unreadCount: 0, connected: false });
-			return;
+			toSafeError(error, 'Failed to fetch inbox stats.');
 		}
-		res.status(500).json({ error: toSafeError(error, 'Failed to fetch inbox stats.') });
+		res.json({ unreadCount: 0, connected: false });
 	}
 });
 
@@ -587,6 +615,91 @@ app.delete('/tasks/:taskId', requireAuth, async (req: AuthenticatedRequest, res:
 	}
 });
 
+// --- Call-invoice download card routes ---
+
+app.get('/invoices/pending-call-downloads', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('invoices')
+			.select('id, invoice_number, created_at')
+			.eq('tenant_id', tenantId)
+			.eq('origin', 'call')
+			.is('downloaded_at', null)
+			.order('created_at', { ascending: true });
+		if (error) throw new Error(error.message);
+		const invoices = data ?? [];
+		res.json({ count: invoices.length, invoices });
+	} catch (error) {
+		res.status(400).json({ error: toSafeError(error, 'Failed to fetch pending call invoices.') });
+	}
+});
+
+app.post('/invoices/call-downloads/zip', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('invoices')
+			.select('id')
+			.eq('tenant_id', tenantId)
+			.eq('origin', 'call')
+			.is('downloaded_at', null)
+			.order('created_at', { ascending: true });
+		if (error) throw new Error(error.message);
+		const pending = data ?? [];
+		if (pending.length === 0) {
+			res.status(404).json({ error: 'No pending call invoices to download.' });
+			return;
+		}
+		const zip = new JSZip();
+		for (const inv of pending) {
+			const { buffer, filename } = await getDocumentBuffer(tenantId, inv.id as string, 'invoice');
+			zip.file(filename, buffer);
+		}
+		const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+		res.setHeader('Content-Type', 'application/zip');
+		res.setHeader('Content-Disposition', 'attachment; filename="invoices.zip"');
+		res.send(zipBuffer);
+	} catch (error) {
+		res.status(500).json({ error: toSafeError(error, 'Failed to build invoice ZIP.') });
+	}
+});
+
+app.post('/invoices/call-downloads/confirm', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	const rawIds: unknown = req.body?.ids;
+	if (!Array.isArray(rawIds) || rawIds.length === 0) {
+		res.status(422).json({ error: 'ids must be a non-empty array.' });
+		return;
+	}
+	const ids = rawIds.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id));
+	if (ids.length === 0) {
+		res.status(422).json({ error: 'No valid invoice ids provided.' });
+		return;
+	}
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		// Return the rows actually updated (not ids.length) so the count reflects only
+		// invoices that matched the tenant + origin='call' filter — never over-reports.
+		const { data, error } = await supabase
+			.from('invoices')
+			.update({ downloaded_at: new Date().toISOString() })
+			.eq('tenant_id', tenantId)
+			.in('id', ids)
+			.eq('origin', 'call')
+			.select('id');
+		if (error) throw new Error(error.message);
+		res.json({ confirmed: data?.length ?? 0 });
+	} catch (error) {
+		res.status(400).json({ error: toSafeError(error, 'Failed to confirm invoice downloads.') });
+	}
+});
+
 app.post(
 	'/agent/resolve-and-run',
 	requireAuth,
@@ -639,6 +752,125 @@ app.post(
 	},
 );
 
+// Validates auth + body for the waste-law chat routes (buffered and streaming).
+// Writes the error response and returns null when the request is rejected;
+// Python re-validates via LawChatRequest.
+function parseWasteLawChatRequest(
+	req: AuthenticatedRequest,
+	res: Response,
+): { userAuthId: string; accessToken: string; message: string; history: WasteLawChatMessage[] } | null {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) {
+		res.status(401).json({ error: 'Missing authenticated user.' });
+		return null;
+	}
+
+	const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+	if (!message) {
+		res.status(422).json({ error: 'message is required.' });
+		return null;
+	}
+	if (message.length > MAX_MESSAGE_LENGTH) {
+		res.status(422).json({ error: `message must not exceed ${MAX_MESSAGE_LENGTH} characters.` });
+		return null;
+	}
+
+	// History is untrusted client input — validate shape and cap size here.
+	const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+	if (rawHistory.length > MAX_LAW_CHAT_HISTORY_MESSAGES) {
+		res.status(422).json({
+			error: `history must not exceed ${MAX_LAW_CHAT_HISTORY_MESSAGES} messages.`,
+		});
+		return null;
+	}
+	const history: WasteLawChatMessage[] = [];
+	for (const item of rawHistory) {
+		const role = item?.role;
+		const content = typeof item?.content === 'string' ? item.content.trim() : '';
+		if ((role !== 'user' && role !== 'assistant') || !content) {
+			res.status(422).json({ error: 'history items must be { role: user|assistant, content: string }.' });
+			return null;
+		}
+		history.push({ role, content: content.slice(0, MAX_LAW_CHAT_HISTORY_CONTENT_LENGTH) });
+	}
+
+	const accessToken = parseBearerToken(req);
+	if (!accessToken) {
+		res.status(401).json({ error: 'Missing bearer token.' });
+		return null;
+	}
+
+	return { userAuthId, accessToken, message, history };
+}
+
+// Waste-law advisor chat (waste-law RAG plan, Phase 5) — dedicated route so the
+// law questions page can pass its conversation history; tenant profile context
+// is resolved here from the JWT and injected into the Python /rag/chat call.
+app.post(
+	'/agent/waste-law/chat',
+	requireAuth,
+	agentLimiter,
+	async (req: AuthenticatedRequest, res: Response) => {
+		const parsed = parseWasteLawChatRequest(req, res);
+		if (!parsed) return;
+		const { userAuthId, accessToken, message, history } = parsed;
+
+		try {
+			const tenantId = await getTenantForUser(userAuthId);
+			const result = await runWasteLawChain({ tenantId, userAuthId, accessToken, message, history });
+			res.json({ answer: result.answer });
+		} catch (error) {
+			res.status(400).json({ error: toSafeError(error, 'Failed to answer waste-law question.') });
+		}
+	},
+);
+
+// SSE variant — pipes the Python /rag/chat/stream response through verbatim so
+// the law page can render the answer as it is generated. Transport only: all
+// business logic stays in wasteLawChain / the Python service.
+app.post(
+	'/agent/waste-law/chat/stream',
+	requireAuth,
+	agentLimiter,
+	async (req: AuthenticatedRequest, res: Response) => {
+		const parsed = parseWasteLawChatRequest(req, res);
+		if (!parsed) return;
+		const { userAuthId, accessToken, message, history } = parsed;
+
+		let stream: ReadableStream<Uint8Array>;
+		try {
+			const tenantId = await getTenantForUser(userAuthId);
+			({ stream } = await runWasteLawChainStream({ tenantId, userAuthId, accessToken, message, history }));
+		} catch (error) {
+			res.status(400).json({ error: toSafeError(error, 'Failed to answer waste-law question.') });
+			return;
+		}
+
+		res.setHeader('Content-Type', 'text/event-stream');
+		res.setHeader('Cache-Control', 'no-cache');
+		res.setHeader('Connection', 'keep-alive');
+		res.flushHeaders();
+
+		const reader = stream.getReader();
+		// Stop pulling from Python when the browser disconnects mid-answer.
+		req.on('close', () => {
+			void reader.cancel().catch(() => undefined);
+		});
+
+		try {
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				res.write(value);
+			}
+		} catch (error) {
+			logger.error({ error: toSafeError(error, 'relay failure') }, 'Waste-law stream relay failed');
+		} finally {
+			res.end();
+		}
+	},
+);
+
 app.post(
 	'/agent/transcribe',
 	requireAuth,
@@ -666,6 +898,49 @@ app.post(
 		}
 	},
 );
+
+// --- Twilio WebRTC token endpoint ---
+// No auth required — the grant only allows outbound calls to your own TwiML App.
+// Open this in voice-test.html to get a token for the browser SDK.
+app.get('/calls/token', (_req: Request, res: Response) => {
+  try {
+    const token = generateWebRtcToken();
+    res.json({ token, identity: 'dev' });
+  } catch (err) {
+    res.status(500).json({ error: toSafeError(err, 'WebRTC token generation failed') });
+  }
+});
+
+// --- Twilio voice webhook routes ---
+// All callers reach a single fixed number. Tenant identity is resolved from the
+// caller's phone number (From) registered in twilio_phone_registrations.
+// Twilio signature validation guards webhook authenticity; no Bearer token is used.
+// The audio-serve and processing-poll routes are excluded from signature validation —
+// Twilio fetches audio / polls without a webhook signature.
+
+app.post('/calls/voice', validateTwilioSignature, async (req: Request, res: Response) => {
+	await handleVoiceEntry(req, res);
+});
+
+app.post('/calls/recording', validateTwilioSignature, async (req: Request, res: Response) => {
+	await handleRecording(req, res);
+});
+
+app.get('/calls/processing/:jobId', (req: Request, res: Response) => {
+	const jobId = String(req.params.jobId ?? '');
+	handleProcessingPoll(jobId, req, res);
+});
+
+app.post('/calls/status', validateTwilioSignature, (req: Request, res: Response) => {
+	handleCallStatus(req, res);
+	res.status(204).send();
+});
+
+app.get('/calls/audio/:audioId', (req: Request, res: Response) => {
+	const audioId = String(req.params.audioId ?? '');
+	serveAudio(audioId, res);
+});
+
 
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {

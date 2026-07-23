@@ -21,7 +21,11 @@ export const supabase: any =
       autoRefreshToken: true,
       detectSessionInUrl: true,
       persistSession: true,
-      storage: window.sessionStorage,
+      // localStorage persists the session across reloads/restarts (the UX requirement).
+      // Accepted tradeoff: it is readable by JS, so it offers no XSS protection over
+      // sessionStorage — only httpOnly cookies would. The compensating control is XSS
+      // prevention (helmet/CSP in apps/agent/src/server.ts), not the storage choice.
+      storage: window.localStorage,
     },
   }));
 
@@ -134,6 +138,19 @@ export type DocumentTemplateResponse = {
   created_at: string;
 };
 
+// Waste-law advisor profile (businesses.tenantprofilecontext) — structured
+// selections that apps/agent formats into the RAG prompt as tenant context
+export type TenantWasteProfile = {
+  entity_type: "individual" | "small_business" | "large_company" | "municipality" | null;
+  waste_types: Array<
+    "hazardous_waste" | "oils_tires" | "textile_paper" | "glass" | "plastic" | "other"
+  >;
+  annual_volume: "under_200kg" | "200kg_5t" | "5t_plus" | null;
+  location: string | null;
+  has_permits: boolean;
+  permit_types: string[];
+};
+
 export type BusinessProfileResponse = {
   business_id: string;
   owner_auth_id: string;
@@ -146,6 +163,7 @@ export type BusinessProfileResponse = {
   address: string | null;
   logo_url: string | null;
   plan: string;
+  tenantprofilecontext: TenantWasteProfile | null;
   created_at: string | null;
 };
 
@@ -206,11 +224,6 @@ type TasksCache = {
 };
 
 let tasksCache: TasksCache | null = null;
-
-type CalendarEventsCache = {
-  data: CalendarEventResponse[];
-  fetchedAt: number;
-};
 
 function readJsonCache<T>(key: string): { data: T; fetchedAt: number } | null {
   try {
@@ -750,6 +763,39 @@ export async function uploadDocumentTemplate(payload: {
   return (await response.json()) as DocumentTemplateResponse;
 }
 
+export type PendingInvoice = {
+  id: string;
+  invoice_number: string;
+  created_at: string;
+};
+
+export async function getPendingCallInvoices(): Promise<{ count: number; invoices: PendingInvoice[] }> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/invoices/pending-call-downloads`, { headers });
+  if (!response.ok) throw new Error('Failed to fetch pending call invoices.');
+  return response.json() as Promise<{ count: number; invoices: PendingInvoice[] }>;
+}
+
+export async function downloadCallInvoicesZip(): Promise<Blob> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/invoices/call-downloads/zip`, {
+    method: 'POST',
+    headers,
+  });
+  if (!response.ok) throw new Error('Failed to download invoice ZIP.');
+  return response.blob();
+}
+
+export async function confirmCallInvoicesDownloaded(ids: string[]): Promise<void> {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/invoices/call-downloads/confirm`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ids }),
+  });
+  if (!response.ok) throw new Error('Failed to confirm invoice downloads.');
+}
+
 export async function createInvoiceDocument(payload: InvoiceDocumentRequest): Promise<{
   blob: Blob;
   filename: string;
@@ -835,6 +881,46 @@ export async function createBusinessProfile(
 
   if (!response.ok) {
     let detail = "Failed to create business profile.";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        detail = data.detail;
+      }
+    } catch {
+      // Keep fallback error message when response body is not JSON.
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as BusinessProfileResponse;
+}
+
+// Partial update via the new PATCH /business/profile — currently used by the
+// settings page to store the waste-law advisor profile
+export async function updateBusinessProfile(
+  updates: Partial<{
+    name: string;
+    tax_number: string | null;
+    transaction_account: string | null;
+    depositor: string | null;
+    phone: string | null;
+    address: string | null;
+    logo_url: string | null;
+    tenantprofilecontext: TenantWasteProfile;
+  }>
+): Promise<BusinessProfileResponse> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/business/profile`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(updates),
+  });
+
+  if (!response.ok) {
+    let detail = "Failed to update business profile.";
     try {
       const data = (await response.json()) as { detail?: string };
       if (data?.detail) {
@@ -1012,7 +1098,20 @@ export async function extractDashboardMessage(message: string, externalSignal?: 
   return payload;
 }
 
-export async function queryLawDocuments(question: string, topK = 5, externalSignal?: AbortSignal): Promise<string> {
+export type LawChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+// Waste-law advisor chat (Phase 6a): routed through apps/agent instead of
+// calling Python directly — the agent resolves the tenant from the JWT and
+// injects the business waste profile as LLM context. History gives the
+// advisor conversation memory across turns.
+export async function queryLawDocuments(
+  question: string,
+  history: LawChatHistoryMessage[] = [],
+  externalSignal?: AbortSignal
+): Promise<string> {
   const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 
   const controller = new AbortController();
@@ -1027,10 +1126,10 @@ export async function queryLawDocuments(question: string, topK = 5, externalSign
 
   let response: Response;
   try {
-    response = await fetch(`${pythonApiBaseUrl}/rag/query`, {
+    response = await fetch(`${agentApiBaseUrl}/agent/waste-law/chat`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ question, top_k: topK }),
+      body: JSON.stringify({ message: question, history }),
       signal: controller.signal,
     });
   } catch (error) {
@@ -1049,10 +1148,9 @@ export async function queryLawDocuments(question: string, topK = 5, externalSign
   if (!response.ok) {
     let detail = "RAG query failed.";
     try {
-      const data = (await response.json()) as { detail?: string };
-      if (data?.detail) {
-        detail = data.detail;
-      }
+      const data = (await response.json()) as { error?: string; detail?: string };
+      // agent routes report failures as { error }; python routes as { detail }
+      detail = data?.error ?? data?.detail ?? detail;
     } catch {
       // keep fallback
     }
@@ -1061,6 +1159,96 @@ export async function queryLawDocuments(question: string, topK = 5, externalSign
 
   const data = (await response.json()) as { answer: string };
   return data.answer;
+}
+
+// Streaming variant of queryLawDocuments: consumes the agent's SSE relay and
+// invokes onDelta per text chunk so the page can render the answer as it is
+// generated. Resolves with the full answer text once the stream completes.
+export async function queryLawDocumentsStream(
+  question: string,
+  history: LawChatHistoryMessage[],
+  onDelta: (delta: string) => void,
+  externalSignal?: AbortSignal
+): Promise<string> {
+  const headers = await getAuthHeaders({ "Content-Type": "application/json" });
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), RAG_TIMEOUT_MS);
+
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", onExternalAbort);
+  }
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch(`${agentApiBaseUrl}/agent/waste-law/chat/stream`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ message: question, history }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if ((error as Error).name === "AbortError" && !externalSignal?.aborted) {
+        throw new Error("RAG query timed out. The model may still be loading — try again shortly.");
+      }
+      throw error;
+    }
+
+    if (!response.ok || !response.body) {
+      let detail = "RAG query failed.";
+      try {
+        const data = (await response.json()) as { error?: string; detail?: string };
+        detail = data?.error ?? data?.detail ?? detail;
+      } catch {
+        // keep fallback
+      }
+      throw new Error(detail);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+
+    // SSE framing: data-only JSON events separated by blank lines.
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let separatorIndex: number;
+      while ((separatorIndex = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, separatorIndex).trim();
+        buffer = buffer.slice(separatorIndex + 2);
+        if (!block.startsWith("data: ")) continue;
+
+        const event = JSON.parse(block.slice(6)) as { delta?: string; done?: boolean; error?: string };
+        if (event.error) {
+          throw new Error(event.error);
+        }
+        if (event.delta) {
+          fullText += event.delta;
+          onDelta(event.delta);
+        }
+        if (event.done) {
+          return fullText;
+        }
+      }
+    }
+
+    // Stream closed without a done event — connection dropped mid-answer.
+    if (!fullText) {
+      throw new Error("The answer stream ended unexpectedly. Please retry.");
+    }
+    return fullText;
+  } finally {
+    window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
+  }
 }
 
 const STT_TIMEOUT_MS = 30_000;

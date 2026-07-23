@@ -45,9 +45,22 @@ def build_document_path(tenant_id, folder, document_id, extension):
     return f"{tenant_uuid}/{normalized_folder}/{document_uuid}.{normalized_extension}"
 
 
+_CONTENT_TYPES = {
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
 def _upload_document(tenant_id, folder, document_id, extension, file_content):
     path = build_document_path(tenant_id, folder, document_id, extension)
-    return supabase.storage.from_("documents").upload(path, file_content)
+    normalized_extension = extension.strip().lower().lstrip(".")
+    # upsert so regenerating an existing document (same id → same path) overwrites the
+    # stored file instead of failing with a 409 "resource already exists".
+    file_options = {
+        "upsert": "true",
+        "content-type": _CONTENT_TYPES.get(normalized_extension, "application/octet-stream"),
+    }
+    return supabase.storage.from_("documents").upload(path, file_content, file_options)
 
 
 def upload_invoice_document(tenant_id, document_id, file_content):

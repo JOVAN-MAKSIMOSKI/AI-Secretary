@@ -252,9 +252,7 @@ export default function Clients() {
       <header>
         <h1 className="text-xl font-medium tracking-[-0.01em] text-[var(--brand-ink)]">Clients</h1>
         <p className="mt-1 text-sm text-[var(--brand-text-muted)]">All clients under your tenant.</p>
-        <p className="mt-2 text-[11px] uppercase tracking-[0.16em] text-[var(--brand-text-muted)]">
-          Tenant ID: <span className="font-mono text-[var(--brand-ink)]">{tenantIdentifier ?? "Loading..."}</span>
-        </p>
+        
         <div className="mt-4 flex justify-end">
           <button
             type="button"

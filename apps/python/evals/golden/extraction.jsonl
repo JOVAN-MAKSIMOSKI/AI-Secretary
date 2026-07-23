@@ -1,0 +1,20 @@
+// Golden extraction set — layer 1 of the invoice pipeline, plus calendar and offer chains.
+// One JSON object per line; // comments allowed. Authored against measured chain output
+// (probe run 2026-07-23), not guessed.
+//
+// Expected-value markers:
+//   "@tomorrow"      — resolves to (today + 1 day) ISO date at runtime, for relative-date cases
+//   "@absent"        — the key must be missing (or null): the chain must not invent a value
+//   "contains:x"     — case-insensitive substring match; everything else is exact (numbers with tolerance)
+
+{"id": "ext-inv-mk-full", "chain": "invoice", "message": "Направи фактура за Тангента за 10 единици по 1500 денари, ДДВ 18%", "expect": {"invoice_type": "goods", "client_name": "contains:тангента", "units": 10, "price_per_unit": 1500, "tax_percentage": 18, "price_before_tax": 15000, "price_after_tax": 12300}}
+{"id": "ext-inv-en-full", "chain": "invoice", "message": "Create an invoice for client Petrov, 5 units at 2000 denars each, 18% tax", "expect": {"client_name": "contains:petrov", "units": 5, "price_per_unit": 2000, "tax_percentage": 18, "price_before_tax": 10000, "price_after_tax": 8200}}
+{"id": "ext-inv-mk-voice-words", "chain": "invoice", "message": "фактура за извршен транспорт пет парчиња по илјада денари", "expect": {"invoice_type": "transport", "units": 5, "price_per_unit": 1000, "tax_percentage": 5, "price_after_tax": 4750}, "note": "Voice surface: Whisper transcribes spoken amounts as number words; transport type must default to 5% tax."}
+{"id": "ext-inv-mk-no-amounts", "chain": "invoice", "message": "Направи фактура за Тангента за консултантски услуги", "expect": {"units": "@absent", "price_per_unit": "@absent", "price_after_tax": "@absent"}, "note": "Omission guard: no amounts in the message means no invented numbers on the invoice."}
+
+{"id": "ext-cal-mk-tomorrow", "chain": "calendar", "message": "Закажи состанок со Марко утре во 14:00 за 45 минути", "expect": {"event_date": "@tomorrow", "event_time": "14:00", "duration_minutes": 45, "event_name": "contains:марко"}}
+{"id": "ext-cal-en-absolute", "chain": "calendar", "message": "Schedule a meeting with the accountant on 2026-08-03 at 09:30 for 30 minutes", "expect": {"event_date": "2026-08-03", "event_time": "09:30", "duration_minutes": 30, "event_name": "contains:accountant"}, "note": "Regression guard: this case first caught event_name coming back in Russian ('встреча с бухгалтером') because only the Cyrillic branch of the calendar prompt's language_hint had an explicit language instruction. Fixed 2026-07-23 by adding an equivalent English-branch instruction in langchain.py."}
+{"id": "ext-cal-mk-absolute", "chain": "calendar", "message": "Закажи повик со сметководителот на 2026-08-10 во 11:00", "expect": {"event_date": "2026-08-10", "event_time": "11:00"}}
+
+{"id": "ext-off-mk", "chain": "offer", "message": "Подготви понуда за годишно одржување во вредност од 24000 денари, важи до 15.08.2026", "expect": {"amount": 24000, "due_date": "2026-08-15", "title": "contains:одржување"}, "note": "European date format 15.08.2026 must normalise to ISO."}
+{"id": "ext-off-en", "chain": "offer", "message": "Prepare an offer for container rental worth 5000 denars, valid until 2026-09-01", "expect": {"amount": 5000, "due_date": "2026-09-01"}}

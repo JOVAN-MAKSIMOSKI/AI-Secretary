@@ -1,19 +1,29 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAppContextStore } from "../../store/app-context";
-import { useSessionStore } from "../../store/session";
-import { queryLawDocuments } from "../../connection/supabase-client";
+import { getUserBusiness, queryLawDocumentsStream } from "../../connection/supabase-client";
 import { useLawChat, type ChatMessage } from "../../hooks/useAgent";
 import { useSTT } from "../../hooks/useSTT";
 
+// Caps mirror the agent/python request limits so long chats never 422
+const HISTORY_MAX_MESSAGES = 50;
+const HISTORY_MAX_CONTENT_LENGTH = 8000;
+
 export default function LawQuestions() {
-  const tenantId = useSessionStore((state) => state.tenantId);
   const userEmail = useAppContextStore((state) => state.userEmail);
   const sttMode = useAppContextStore((state) => state.sttMode);
-  const tenantIdentifier = tenantId;
   const { messages, addMessage, clearMessages } = useLawChat();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // In-flight answer text, rendered live as SSE deltas arrive. Kept out of the
+  // persisted chat store until complete so sessionStorage isn't written per token.
+  const [streamingText, setStreamingText] = useState("");
+  // Ref mirror of streamingText: the catch block commits the partial answer on
+  // abort, and reading state there would see a stale closure value.
+  const streamedRef = useRef("");
+  // null = still loading; true/false = whether the waste profile is set up
+  const [hasWasteProfile, setHasWasteProfile] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -28,7 +38,23 @@ export default function LawQuestions() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, streamingText]);
+
+  // One-time profile check to drive the non-blocking setup banner (Phase 6c);
+  // the advisor still answers without a profile, just less specifically.
+  useEffect(() => {
+    let cancelled = false;
+    getUserBusiness()
+      .then((business) => {
+        if (!cancelled) setHasWasteProfile(Boolean(business?.tenantprofilecontext));
+      })
+      .catch(() => {
+        if (!cancelled) setHasWasteProfile(null); // unknown — stay silent rather than nag
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!transcript) return;
@@ -39,6 +65,13 @@ export default function LawQuestions() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcript]);
+
+  // Pressing record discards any text sitting in the input and starts a fresh
+  // recording, so a prior/half-typed message is never carried into the next take.
+  const handleStartRecording = () => {
+    setInput("");
+    startRecording();
+  };
 
   const handleStop = () => {
     abortControllerRef.current?.abort();
@@ -64,8 +97,26 @@ export default function LawQuestions() {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    streamedRef.current = "";
+    setStreamingText("");
+
     try {
-      const answer = await queryLawDocuments(content, 5, abortController.signal);
+      // messages still holds the pre-question conversation here (the new user
+      // message lands in the store asynchronously) — exactly the history the
+      // advisor needs; the current question travels separately.
+      const history = messages.slice(-HISTORY_MAX_MESSAGES).map((m) => ({
+        role: m.role,
+        content: m.content.slice(0, HISTORY_MAX_CONTENT_LENGTH),
+      }));
+      const answer = await queryLawDocumentsStream(
+        content,
+        history,
+        (delta) => {
+          streamedRef.current += delta;
+          setStreamingText(streamedRef.current);
+        },
+        abortController.signal
+      );
       const assistantMessage: ChatMessage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: "assistant",
@@ -74,10 +125,22 @@ export default function LawQuestions() {
       };
       addMessage(assistantMessage);
     } catch (err) {
+      // A stopped or failed stream still produced visible text — keep it in the
+      // conversation instead of discarding what the user already read.
+      if (streamedRef.current) {
+        addMessage({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: "assistant",
+          content: streamedRef.current,
+          createdAt: new Date().toISOString(),
+        });
+      }
       if ((err as Error).name !== "AbortError") {
         setError((err as Error).message ?? "Something went wrong. Please try again.");
       }
     } finally {
+      streamedRef.current = "";
+      setStreamingText("");
       abortControllerRef.current = null;
       setIsLoading(false);
     }
@@ -111,7 +174,7 @@ export default function LawQuestions() {
               <p className="mt-1 text-xs text-[var(--brand-text-muted)]">Ask waste-management law questions answered by local legal documents.</p>
             </div>
             <div className="flex items-center gap-3">
-              <p className="text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"} · {tenantIdentifier ?? "Loading..."}</p>
+              <p className="text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"}</p>
               <button
                 type="button"
                 onClick={clearChat}
@@ -123,12 +186,26 @@ export default function LawQuestions() {
           </div>
         </div>
 
+        {hasWasteProfile === false && (
+          <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-teal-soft)] px-4 py-2.5">
+            <p className="text-xs text-[var(--brand-ink)]">
+              Set your business waste profile for more specific legal advice.
+            </p>
+            <Link
+              to="/portal/settings"
+              className="shrink-0 text-xs font-medium text-[var(--brand-teal)] hover:underline"
+            >
+              Set up profile →
+            </Link>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {messages.length === 0 && !isLoading ? (
             <div className="grid h-full place-items-center">
               <div className="max-w-md text-center">
                 <h3 className="text-xl font-medium tracking-[-0.01em] text-[var(--brand-ink)]">Ask a law question</h3>
-                <p className="mt-2 text-sm text-[var(--brand-text-muted)]">Answers are retrieved from local waste-management law documents via Qdrant + Ollama.</p>
+                <p className="mt-2 text-sm text-[var(--brand-text-muted)]">Answers are retrieved from local waste-management law documents via Qdrant.</p>
               </div>
             </div>
           ) : (
@@ -152,13 +229,21 @@ export default function LawQuestions() {
 
               {isLoading && (
                 <div className="w-full">
-                  <div className="mr-auto max-w-[90%] rounded-xl bg-[var(--brand-card)] px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)] [animation-delay:-0.3s]" />
-                      <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)] [animation-delay:-0.15s]" />
-                      <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)]" />
+                  {streamingText ? (
+                    // Live answer bubble — mirrors the committed assistant style
+                    // so the hand-off when the stream finishes is seamless.
+                    <div className="mr-auto max-w-[90%] rounded-xl bg-[var(--brand-card)] px-3 py-2 text-sm leading-7 text-[var(--brand-ink)]">
+                      <p className="whitespace-pre-wrap">{streamingText}</p>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="mr-auto max-w-[90%] rounded-xl bg-[var(--brand-card)] px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)] [animation-delay:-0.3s]" />
+                        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)] [animation-delay:-0.15s]" />
+                        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--brand-teal)]" />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -197,7 +282,7 @@ export default function LawQuestions() {
               ) : (
                 <button
                   type="button"
-                  onClick={startRecording}
+                  onClick={handleStartRecording}
                   disabled={isLoading}
                   aria-label="Start voice input"
                   className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)] disabled:opacity-40 disabled:cursor-not-allowed"

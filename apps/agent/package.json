@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --alias:@secretary/shared-types=../../packages/shared-types/src/index.ts --outfile=dist/server.js",
     "start": "node dist/server.js",
     "lint": "eslint src",
     "type-check": "tsc --noEmit",
-    "test:resolver": "tsx --test src/agent/nodes/llmResolver.test.ts"
+    "eval:coverage": "tsx src/evals/coverage.ts",
+    "eval:offline": "tsx --test src/evals/offline.eval.ts src/evals/handlerLogic.eval.ts",
+    "eval:routing": "tsx --test src/evals/routing.eval.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -20,15 +22,20 @@
     "@supabase/supabase-js": "^2.49.8",
     "@types/multer": "^2.1.0",
     "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "elevenlabs": "^1.59.0",
     "express": "^4.21.0",
     "express-rate-limit": "^8.2.1",
     "googleapis": "^140.0.1",
-    "helmet": "^8.0.0",
+    "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.2",
+    "jszip": "^3.10.1",
     "multer": "^2.2.0",
     "nodemailer": "^8.0.7",
     "pg": "^8.16.3",
-    "zod": "^3.24.0"
+    "twilio": "^5.13.1",
+    "zod": "^3.24.0",
+    "@secretary/shared-types": "workspace:*"
   },
   "devDependencies": {
     "@types/cors": "^2.8.0",
@@ -36,6 +43,7 @@
     "@types/jsonwebtoken": "^9.0.0",
     "@types/node": "^22.19.17",
     "@types/nodemailer": "^8.0.0",
+    "esbuild": "^0.25.0",
     "prisma": "^7.8.0",
     "tsx": "^4.0.0",
     "typescript": "^5.8.0"

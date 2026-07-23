@@ -7,18 +7,22 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+# PostgreSQL int4 upper bound — integer columns reject anything larger.
+PG_INT4_MAX = 2147483647
+
+
 class InvoiceRequest(BaseModel):
     client_id: str
     invoice_number: str = Field(pattern=r"^\d{3,}/\d+$")
     invoice_type: Literal["goods", "transport"]
     invoice_date: date
     value_date: date
-    consignment_note_number: Optional[int] = Field(default=None, ge=0)
-    order_number: Optional[int] = Field(default=None, ge=0)
+    consignment_note_number: Optional[int] = Field(default=None, ge=0, le=PG_INT4_MAX)
+    order_number: Optional[int] = Field(default=None, ge=0, le=PG_INT4_MAX)
     client_name: str = Field(min_length=1, max_length=120)
     client_tax_number: str = Field(min_length=1, max_length=60)
     description: str = Field(min_length=1, max_length=2000)
-    units: int = Field(ge=0)
+    units: int = Field(ge=0, le=PG_INT4_MAX)
     price_per_unit: Decimal = Field(ge=0, decimal_places=2, max_digits=12)
     tax_percentage: Decimal = Field(ge=0, le=100, decimal_places=2, max_digits=5)
     price_before_tax: Decimal = Field(ge=0, decimal_places=2, max_digits=12)

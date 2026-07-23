@@ -13,6 +13,15 @@ function toBase64Url(input: Buffer): string {
     .replace(/=+$/g, '');
 }
 
+// Reject CR/LF in any value interpolated into a MIME header — a newline allows injecting
+// arbitrary headers (e.g. Bcc) when the value originates from stored client data.
+function safeHeader(value: string): string {
+  if (/[\r\n]/.test(value)) {
+    throw new Error('Invalid header value.');
+  }
+  return value;
+}
+
 function buildMimeMessage(params: {
   from: string;
   to: string;
@@ -25,9 +34,9 @@ function buildMimeMessage(params: {
   const attachmentBase64 = params.attachment.toString('base64');
 
   const mime = [
-    `From: ${params.from}`,
-    `To: ${params.to}`,
-    `Subject: ${params.subject}`,
+    `From: ${safeHeader(params.from)}`,
+    `To: ${safeHeader(params.to)}`,
+    `Subject: ${safeHeader(params.subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     '',
@@ -38,9 +47,9 @@ function buildMimeMessage(params: {
     params.text,
     '',
     `--${boundary}`,
-    `Content-Type: application/octet-stream; name="${params.filename}"`,
+    `Content-Type: application/octet-stream; name="${safeHeader(params.filename)}"`,
     'Content-Transfer-Encoding: base64',
-    `Content-Disposition: attachment; filename="${params.filename}"`,
+    `Content-Disposition: attachment; filename="${safeHeader(params.filename)}"`,
     '',
     attachmentBase64,
     '',
@@ -85,7 +94,7 @@ export const sendSmtpTestEmail = sendGmailTestEmail;
 /**
  * Fetch document file from Supabase storage
  */
-async function getDocumentBuffer(
+export async function getDocumentBuffer(
   tenantId: string,
   documentId: string,
   documentType: 'invoice' | 'offer'
@@ -173,7 +182,9 @@ export async function sendDocumentToClient(
       };
     }
 
-    if (!recipientEmail.includes('@')) {
+    // Basic shape check that also rejects CR/LF, so a malformed stored address cannot reach
+    // the MIME builder (defense in depth alongside safeHeader).
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
       return {
         success: false,
         error: `Client '${clientId}' has invalid email '${recipientEmail}'`,

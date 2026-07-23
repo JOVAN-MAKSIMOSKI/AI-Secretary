@@ -12,6 +12,7 @@ from openpyxl import load_workbook
 
 from services.invoices.calculations import apply_invoice_price_calculations
 from services.invoices.client_lookup import fetch_client_contact_from_extracted
+from services.invoices.mk_numbers import contains_mk_number_words, normalize_mk_number_words
 from langchain import run_invoice_extraction
 from services.storage import supabase
 
@@ -88,7 +89,8 @@ _CONSIGNMENT_NUMBER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _UNITS_PATTERN = re.compile(
-    r"\b(\d+)\s*(?:units?|unit|pcs?|pieces?|edinici|единици|парчиња?)\b",
+    # "парч(?:иња|е)" covers both plural ("5 парчиња") and singular ("1 парче").
+    r"\b(\d+)\s*(?:units?|unit|pcs?|pieces?|edinici|единици|парч(?:иња|е))\b",
     re.IGNORECASE,
 )
 _PRICE_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -161,8 +163,15 @@ def _apply_rule_based_extraction_fallback(
 ) -> dict[str, Any]:
     """Backfill common invoice fields when LLM output is missing or misrouted."""
     result = dict(extracted)
-    raw_message = message.strip()
+    # Rewrite Macedonian number words to digits first ("пет парчиња по илјада" →
+    # "5 парчиња по 1000") so every digit-based regex below can match spoken amounts —
+    # the local extraction LLM cannot convert Cyrillic number words itself.
+    raw_message = normalize_mk_number_words(message.strip())
     lowered_message = raw_message.lower()
+    # When the user spoke amounts as Macedonian number words, the LLM's numeric output
+    # is unreliable (it converts "две илјади и петстотини" to 2000, dropping the 500) —
+    # so the deterministic parse below must override LLM values, not just backfill.
+    prefer_rule_based_amounts = contains_mk_number_words(message)
 
     has_order_hint = _ORDER_HINT_PATTERN.search(raw_message) is not None
     has_consignment_hint = _CONSIGNMENT_HINT_PATTERN.search(raw_message) is not None
@@ -199,13 +208,13 @@ def _apply_rule_based_extraction_fallback(
     if has_consignment_hint and not has_order_hint and "consignment_note_number" in result:
         result.pop("order_number", None)
 
-    if "units" not in result:
+    if "units" not in result or prefer_rule_based_amounts:
         units_raw = _first_pattern_match(_UNITS_PATTERN, raw_message)
         parsed_units = _parse_number_like(units_raw) if units_raw is not None else None
         if parsed_units is not None and parsed_units.is_integer() and parsed_units >= 0:
             result["units"] = int(parsed_units)
 
-    if "price_per_unit" not in result:
+    if "price_per_unit" not in result or prefer_rule_based_amounts:
         for pattern in _PRICE_PATTERNS:
             price_raw = _first_pattern_match(pattern, raw_message)
             parsed_price = _parse_number_like(price_raw) if price_raw is not None else None

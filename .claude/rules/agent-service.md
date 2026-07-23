@@ -239,15 +239,23 @@ The `/agent/resolve-and-run` endpoint calls `runDirectResolverChain()` and retur
 
 | Env var | Values | Behavior |
 |---|---|---|
-| `ROUTER_LLM_PROVIDER` | `anthropic`, `github`, `keyword`, `auto` | Selects routing backend |
-| `ROUTER_ALLOW_KEYWORD_FALLBACK` | `true`/`1` | Falls back to keyword matching if LLM fails |
+| `ROUTER_LLM_PROVIDER` | `openai`, `anthropic`, `github`, `keyword`, `auto` | Selects routing backend |
+| `ROUTER_ALLOW_KEYWORD_FALLBACK` | `true`/`1` | Falls back to keyword matching if LLM fails — **policy: keep `false`**, see `guardrails.md` Router LLM Env Vars |
 | `ROUTER_LLM_MODEL` | model name | Overrides default model for either provider |
 | `ROUTER_GITHUB_MODELS_TOKEN` | token | Required for GitHub Models provider |
+| `OPENAI_API_KEY` | key | Required for the OpenAI provider |
 | `ANTHROPIC_MODEL` | model name | Override for Anthropic routing model |
 
-**Auto mode priority:** GitHub Models token → Anthropic → keyword fallback (if allowed).
+**Auto mode priority:** OpenAI → GitHub Models → Anthropic → keyword fallback (if allowed).
 
-Keyword fallback returns confidence `0.55` (keyword match) or `0.35` (no match).
+GitHub Models and OpenAI share one implementation (`resolveWithOpenAiCompatible`) because
+both speak the same `/chat/completions` protocol — they differ only by base URL, token,
+and model. Add any future OpenAI-compatible backend as another thin wrapper rather than a
+fourth copy of the request logic.
+
+Keyword fallback returns confidence `0.55` (keyword match) or `0.35` (no match) — it is
+disabled by policy (`ROUTER_ALLOW_KEYWORD_FALLBACK=false`); the mechanics remain documented
+here only so the code path is understood.
 
 The resolver always returns a `ResolverDecision`:
 ```typescript
@@ -283,16 +291,20 @@ interface AgentState {
 
 ---
 
-## Shared Packages
+## Shared Packages & Local Modules
 
-These packages are available to import across `apps/agent`:
+The only shared workspace package is:
 
-- `packages/shared-types` — `Tenant`, `Client`, `Document`, `Interaction` interfaces
-- `packages/config` — Zod env schemas per service (validates env vars at startup)
-- `packages/logger` — Shared pino logger config — use this instead of `console.log`
+- `packages/shared-types` — `Business`, `Client`, `Invoice`, `Offer`, `Task` interfaces (mirror the real Prisma schema, `snake_case` to match the API contract)
+
+Env validation and logging are **local agent modules**, not shared packages:
+
+- `src/lib/env.ts` — `validateAgentEnv()`, called once at startup in `server.ts`; fails the boot on missing/malformed env vars
+- `src/lib/logger.ts` — structured logger; use this instead of `console.log`
 
 Import example:
 ```typescript
 import type { Client } from '@secretary/shared-types';
-import { logger } from '@secretary/logger';
+import { logger } from './lib/logger.js';
+import { validateAgentEnv } from './lib/env.js';
 ```

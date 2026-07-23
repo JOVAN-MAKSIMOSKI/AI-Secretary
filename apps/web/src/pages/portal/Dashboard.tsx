@@ -1,19 +1,23 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  confirmCallInvoicesDownloaded,
   createInvoiceDocument,
+  downloadCallInvoicesZip,
   extractDashboardMessage,
   getCachedTasks,
   getGmailInboxStats,
+  getPendingCallInvoices,
   listCalendarEvents,
   listTasks,
   type CalendarEventResponse,
   type DashboardResolveAndRunResponse,
   type ExtractedInvoiceFromMessage,
   type InvoiceDocumentRequest,
+  type PendingInvoice,
 } from "../../connection/supabase-client";
 import { useAppContextStore } from "../../store/app-context";
-import { useDashboardChat, type ChatMessage } from "../../hooks/useAgent";
+import { useDashboardChat } from "../../hooks/useAgent";
 import { useSTT } from "../../hooks/useSTT";
 
 function formatDateIso(dateValue: string): string {
@@ -310,6 +314,9 @@ export default function PortalDashboard() {
     getCachedTasks().filter((t) => t.status === "pending").length
   );
   const [tasksLoadFailed, setTasksLoadFailed] = useState(false);
+  const [pendingCallInvoices, setPendingCallInvoices] = useState<PendingInvoice[]>([]);
+  const [pendingCallCount, setPendingCallCount] = useState(0);
+  const [isDownloadingInvoices, setIsDownloadingInvoices] = useState(false);
 
   const sttMode = useAppContextStore((state) => state.sttMode);
 
@@ -332,6 +339,13 @@ export default function PortalDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcript]);
 
+  // Pressing record discards any text sitting in the input and starts a fresh
+  // recording, so a prior/half-typed message is never carried into the next take.
+  const handleStartRecording = () => {
+    setInput("");
+    startRecording();
+  };
+
   useEffect(() => {
     const timeMin = new Date().toISOString();
     const timeMax = new Date(Date.now() + TOMORROW_END_OFFSET_MS).toISOString();
@@ -352,6 +366,10 @@ export default function PortalDashboard() {
     listTasks({ status: "pending" })
       .then((tasks) => setPendingTaskCount(tasks.length))
       .catch(() => setTasksLoadFailed(true));
+
+    getPendingCallInvoices()
+      .then(({ count, invoices }) => { setPendingCallCount(count); setPendingCallInvoices(invoices); })
+      .catch(() => { /* non-fatal */ });
   }, []);
 
   useEffect(() => {
@@ -459,6 +477,30 @@ export default function PortalDashboard() {
 
   const userInitial = (userEmail ?? "U")[0].toUpperCase();
 
+  const handleDownloadCallInvoices = async () => {
+    if (isDownloadingInvoices || pendingCallCount === 0) return;
+    setIsDownloadingInvoices(true);
+    try {
+      const ids = pendingCallInvoices.map((inv) => inv.id);
+      const blob = await downloadCallInvoicesZip();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "invoices.zip";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      await confirmCallInvoicesDownloaded(ids);
+      setPendingCallCount(0);
+      setPendingCallInvoices([]);
+    } catch {
+      // non-fatal: user can retry
+    } finally {
+      setIsDownloadingInvoices(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-[var(--brand-surface)] md:h-full md:min-h-0">
       {/* Metric cards strip */}
@@ -468,7 +510,7 @@ export default function PortalDashboard() {
             <p className="text-xs font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Overview</p>
             <p className="text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"}</p>
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
 
             {/* Card 1 — Upcoming calendar events */}
             <div onClick={() => navigate("/portal/calendar")} className="flex cursor-pointer flex-col justify-between rounded-2xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-5 shadow-sm shadow-black/[0.03] transition hover:border-[var(--brand-teal)] hover:shadow-md hover:shadow-black/[0.06]">
@@ -557,6 +599,40 @@ export default function PortalDashboard() {
                 </div>
                 <p className="text-[10px] text-[var(--brand-text-muted)]">
                   {tasksLoadFailed ? "Tasks · failed to load" : "Tasks · live"}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 4 — Call invoices ready to download */}
+            <div
+              onClick={handleDownloadCallInvoices}
+              className={`flex flex-col justify-between rounded-2xl border p-5 shadow-sm shadow-black/[0.03] transition ${
+                pendingCallCount > 0
+                  ? "cursor-pointer border-[var(--brand-teal)] bg-[var(--brand-card)] hover:shadow-md hover:shadow-black/[0.06]"
+                  : "border-[var(--brand-border)] bg-[var(--brand-card)] opacity-60"
+              }`}
+            >
+              <div>
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--brand-teal-soft)]">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 3v13M7 11l5 5 5-5" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M3 20h18" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <p className="text-[11px] font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Call Invoices</p>
+                <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--brand-ink)]">
+                  {isDownloadingInvoices ? "…" : pendingCallCount}
+                </p>
+                {pendingCallCount > 0 && (
+                  <p className="mt-1 text-[11px] text-[var(--brand-text-muted)]">Click to download ZIP</p>
+                )}
+              </div>
+              <div className="mt-5 flex items-center gap-2 border-t border-[var(--brand-border)] pt-3">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-teal)] text-[9px] font-bold text-white">
+                  {userInitial}
+                </div>
+                <p className="text-[10px] text-[var(--brand-text-muted)]">
+                  {isDownloadingInvoices ? "Downloading…" : "Voice-generated · pending"}
                 </p>
               </div>
             </div>
@@ -677,7 +753,7 @@ export default function PortalDashboard() {
                   {isRecording || isTranscribing ? (
                     <button
                       type="button"
-                      onClick={startRecording}
+                      onClick={handleStartRecording}
                       disabled
                       aria-label="Add"
                       className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] opacity-40"
@@ -689,7 +765,7 @@ export default function PortalDashboard() {
                   ) : (
                     <button
                       type="button"
-                      onClick={startRecording}
+                      onClick={handleStartRecording}
                       disabled={isLoading}
                       aria-label="Start voice input"
                       className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--brand-border)] bg-[var(--brand-card)] text-[var(--brand-text-muted)] transition hover:border-[var(--brand-teal)] hover:text-[var(--brand-teal)] disabled:opacity-40 disabled:cursor-not-allowed"

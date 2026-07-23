@@ -1,0 +1,14 @@
+# Deployed to /opt/ai-secretary/Caddyfile on the VPS (mounted read-only into caddy).
+# Subdomain routing (not path routing) so Express/FastAPI route prefixes stay untouched.
+# Caddy auto-provisions Let's Encrypt certs once DNS A records point at the VPS.
+# Replace YOURDOMAIN.com before deploying.
+
+# api. is also the Twilio webhook host (AGENT_PUBLIC_URL)
+api.YOURDOMAIN.com {
+    reverse_proxy agent:3000
+}
+
+# py. is called directly by the Vercel web app (VITE_PYTHON_API_BASE_URL)
+py.YOURDOMAIN.com {
+    reverse_proxy python:8000
+}

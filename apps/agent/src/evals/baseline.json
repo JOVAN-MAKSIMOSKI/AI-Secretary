@@ -1,0 +1,5 @@
+{
+  "_comment": "Committed contract for Gate B. Measured 2026-07-22 on openai/gpt-4o-mini: 16/16 = 1.000 overall, every chain 4/4, after the inv-mk-transport case was retired. With 16 cases one case is worth 0.0625, so a 0.93 floor tolerates exactly one miss (15/16 = 0.9375 passes) and fails at two (14/16 = 0.875). Raising this after a green run is how gains get locked in; lowering it is accepting a regression and must be its own reviewable diff.",
+  "overallAccuracy": 0.93,
+  "perChainAccuracy": 0.75
+}

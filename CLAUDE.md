@@ -25,8 +25,12 @@ This project uses custom Claude Code skills stored in `.claude/skills/`. Load th
 
 | Task | Skill to load |
 |---|---|
-| Any MCP work (client, transport, sampling, agent loop, approval gates) | `.claude/skills/mcp-architecture/` |
 | Creating/editing skills, expanding any .md file, post-session skill review, skill audits | `.claude/skills/skill-management/` |
+| Evals for chains/agents — golden sets, heuristic checks, LLM-as-judge, CI eval gating | `.claude/skills/agent-evals/` |
+| Adding a chain to `chainRegistry.ts`, or writing/expanding golden routing cases | `.claude/skills/chain-eval-authoring/` |
+| Output validation, prompt-injection filtering, retry-with-backoff for LLM calls | `.claude/skills/ai-agent-guardrails/` — examples are Python/Lambda-flavoured; adapt to this repo's TS-orchestrator rule |
+| AWS serverless security review (Lambda, API Gateway, Terraform) — **other projects only**, this repo has no AWS | `.claude/skills/aws-serverless-security/` |
+| CloudWatch log watcher script for Lambda-backed agents — **other projects only** | `.claude/skills/agent-log-watcher/` |
 
 **How skills activate:** Claude reads the skill's `SKILL.md` before proceeding when the task matches its description. If you are unsure whether a skill applies, read the `SKILL.md` description — it lists its own trigger conditions explicitly.
 
@@ -46,9 +50,13 @@ Project rules are split across scoped files so context only loads when relevant.
 | `.claude/rules/conventions.md` | Always | Naming, imports, commit messages, file structure |
 | `.claude/rules/frontend.md` | `apps/web/**` | React rules, state management, shadcn/ui, routing |
 | `.claude/rules/agent-service.md` | `apps/agent/**` | LangGraph patterns, tool nodes, approval gate, caching |
-| `.claude/rules/python-service.md` | `apps/python/**` | FastAPI routes, openpyxl, python-docx, RAG, STT |
-| `.claude/skills/mcp-architecture/` | On demand | MCP client, transport, sampling, elicitation |
+| `.claude/rules/python-service.md` | `apps/python/**` | FastAPI routes, openpyxl, python-docx, RAG, STT, uv dependency management |
 | `.claude/skills/skill-management/` | On demand | Skill creation, testing, post-session review, auditing |
+| `.claude/skills/agent-evals/` | On demand | Three-tier eval pipeline, judge design, golden sets, CI gating |
+| `.claude/skills/chain-eval-authoring/` | On demand | Writing golden routing cases when a chain is added or expanded |
+| `.claude/skills/ai-agent-guardrails/` | On demand | LLM output validation, injection filtering, retries (Python-flavoured examples) |
+| `.claude/skills/aws-serverless-security/` | On demand | AWS/Terraform hardening — not applicable to this repo's Hetzner/Docker stack |
+| `.claude/skills/agent-log-watcher/` | On demand | CloudWatch/Lambda log watcher generator — not applicable to this repo |
 | `.github/architecture.md` | Reference | Full repo tree, service boundaries, LLM resolver contract |
 | `.claude/plans/` | Reference | Implementation plans for in-progress or upcoming features |
 
@@ -120,6 +128,6 @@ These apply to every task in every file, no exceptions.
 - Both require Gmail OAuth to be connected first (`gmail_oauth_connections` table).
 
 ### Packages
-- `packages/shared-types` — shared TS interfaces (`Tenant`, `Client`, `Document`, `Interaction`), import from `@secretary/shared-types`
-- `packages/config` — Zod env validation schemas, run at startup
-- `packages/logger` — pino logger, use instead of `console.log`
+- `packages/shared-types` — shared TS interfaces (`Business`, `Client`, `Invoice`, `Offer`, `Task`) mirroring the real schema, import from `@secretary/shared-types`
+- Env validation lives per-service, not in a shared package: `apps/agent/src/lib/env.ts` (`validateAgentEnv`, called at startup in `server.ts`) and the env guard at the top of `apps/python/main.py`.
+- Logging lives per-service: `apps/agent/src/lib/logger.ts`. There is no shared logger package.

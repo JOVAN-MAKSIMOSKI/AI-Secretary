@@ -2,6 +2,18 @@
 node_modules/
 frontend/node_modules/
 frontend/dist/
+apps/**/dist/
+
+# Qdrant local vector DB data
+**/qdrant_data/
+
+# Raw law corpus (large binaries) — regenerate the vector store via apps/python/scripts/ingest.py
+apps/agent/src/rag-agent/resources/*
+!apps/agent/src/rag-agent/resources/.gitkeep
+/resources/
+
+# Local state of the corpus freshness watcher (scripts/check_new_laws.py)
+apps/python/scripts/last_checked.json
 
 # Python
 backend/.venv/
@@ -21,8 +33,16 @@ apps/python/.venv/
 **/venv/
 **/.venv/
 
+# Twilio recording-encryption key material (private key lives only in .env)
+*.pem
+
 # Local Claude Code settings (machine-specific permissions)
 .claude/settings.local.json
 
 # Supabase local temp metadata
 supabase/.temp/
+
+# VS Code workspace files are per-machine editor state
+*.code-workspace
+
+documentation.txt

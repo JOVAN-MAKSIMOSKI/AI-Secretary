@@ -20,7 +20,9 @@ export async function transcribeAudio(
   const form = new FormData();
   // Intentionally do NOT send tenant_id or filename to Python — the service
   // authenticates via service secret and derives a safe suffix internally.
-  form.append("audio", new Blob([audioBuffer]), "recording.webm");
+  // Wrap in Uint8Array: a Node Buffer's backing store may be a SharedArrayBuffer,
+  // which is not assignable to BlobPart under strict types.
+  form.append("audio", new Blob([new Uint8Array(audioBuffer)]), "recording.webm");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), STT_TIMEOUT_MS);

@@ -78,22 +78,22 @@ const newDoc = await prisma.document.create({
 
 ## Python Development
 
-### Virtual Environment
+### Virtual Environment (uv)
 
 ```bash
-# Create venv
-python3.11 -m venv venv
+# Create/update .venv exactly from uv.lock
+uv sync
 
-# Activate
-source venv/bin/activate  # macOS/Linux
-.\venv\Scripts\activate   # Windows
+# Run commands inside the environment (no manual activation needed)
+uv run <command>
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Freeze updates
-pip freeze > requirements.txt
+# Add or remove dependencies (updates pyproject.toml + uv.lock together)
+uv add <package>
+uv remove <package>
 ```
+
+Dependencies live in `pyproject.toml` (fully pinned) + `uv.lock` — never
+`pip install` directly and never create a `requirements.txt`.
 
 ### Running Python Service Locally
 

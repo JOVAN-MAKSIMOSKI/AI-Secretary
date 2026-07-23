@@ -1,0 +1,20 @@
+// Golden retrieval set for the waste-law corpus. One JSON object per line; // comments allowed.
+// Each case asserts that the expected law appears in the retriever's top-k for a question
+// a real user would ask. `expect_law` is a case-insensitive substring of the `law` payload
+// field, so it survives small title variations in the corpus.
+//
+// Cases were authored against measured retrieval output, not guessed. Questions whose
+// correct source is genuinely ambiguous were deliberately excluded — e.g. "what are the
+// penalties for missing the annual report" is answered by penalty articles in at least
+// three separate laws, so any single expectation would be arbitrary and the case would
+// test nothing except which law happened to rank first.
+
+{"id": "ret-landfill-conditions", "question": "Кои се условите кои треба да ги исполнуваат депониите?", "expect_law": "депониите"}
+{"id": "ret-hazardous-storage", "question": "Која дозвола ми треба за складирање на опасен отпад?", "expect_law": "опасниот отпад"}
+{"id": "ret-packaging-duties", "question": "Кои се обврските за отпад од пакување?", "expect_law": "пакување"}
+{"id": "ret-weee", "question": "Како се управува со отпадна електрична и електронска опрема?", "expect_law": "електрична"}
+{"id": "ret-pcb", "question": "Како се постапува со ПХБ?", "expect_law": "ПХБ"}
+{"id": "ret-titanium-dioxide", "question": "Како се постапува со отпад од титаниум диоксид?", "expect_law": "титаниум диоксид"}
+{"id": "ret-transboundary-forms", "question": "Кои обрасци се потребни за прекугранично пренесување отпад?", "expect_law": "прекугранично"}
+{"id": "ret-incineration-limits", "question": "Кои се граничните вредности на емисии при согорување отпад?", "expect_law": "согорување"}
+{"id": "ret-storage-tech-conditions", "question": "Кои се минималните технички услови за складирање отпад?", "expect_law": "складирање"}

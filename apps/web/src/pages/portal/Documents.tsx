@@ -2,17 +2,9 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   createInvoiceDocument,
   getClientsByTenant,
-  uploadDocumentTemplate,
 } from "../../connection/supabase-client";
-import { useAppContextStore } from "../../store/app-context";
 import { useSessionStore } from "../../store/session";
 
-const TEMPLATE_TYPES = ["invoice", "offer"] as const;
-const TEMPLATE_EXTENSIONS = ["xlsx", "docx"] as const;
-const FILE_ACCEPT_BY_EXTENSION: Record<(typeof TEMPLATE_EXTENSIONS)[number], string> = {
-  xlsx: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  docx: ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-};
 const INVOICE_TYPES = ["goods", "transport"] as const;
 const INVOICE_NUMBER_PATTERN = /^\d+\/\d+$/;
 
@@ -47,20 +39,8 @@ function parseOptionalNonNegativeInteger(value: string): number | null {
   return parsed;
 }
 
-function fileMatchesExtension(file: File, extension: (typeof TEMPLATE_EXTENSIONS)[number]) {
-  return file.name.toLowerCase().endsWith(`.${extension}`);
-}
-
 export default function Documents() {
   const tenantId = useSessionStore((state) => state.tenantId);
-  const userEmail = useAppContextStore((state) => state.userEmail);
-  const [name, setName] = useState("Invoice template");
-  const [docType, setDocType] = useState<(typeof TEMPLATE_TYPES)[number]>("invoice");
-  const [extension, setExtension] = useState<(typeof TEMPLATE_EXTENSIONS)[number]>("xlsx");
-  const [file, setFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [invoiceClientId, setInvoiceClientId] = useState("");
@@ -135,44 +115,6 @@ export default function Documents() {
     setInvoiceClientName(selectedClient.name);
     setInvoiceClientTaxNumber(selectedClient.tax_number ?? "");
   }, [selectedClient]);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError("");
-    setSuccess("");
-
-    if (!tenantId) {
-      setError("Tenant id is still loading. Please wait a moment and try again.");
-      return;
-    }
-
-    if (!file) {
-      setError("Please choose a template file to upload.");
-      return;
-    }
-
-    if (!fileMatchesExtension(file, extension)) {
-      setError(`Selected file must match the chosen .${extension} extension.`);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await uploadDocumentTemplate({
-        name,
-        docType,
-        extension,
-        file,
-      });
-
-      setSuccess(`Uploaded ${result.title} successfully. Storage path: ${result.storage_path}`);
-      setFile(null);
-    } catch (uploadError) {
-      setError((uploadError as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleInvoiceSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -274,145 +216,6 @@ export default function Documents() {
   return (
     <section className="min-h-full bg-[var(--brand-surface)] px-4 py-6 text-[var(--brand-ink)] md:px-6">
       <div className="mx-auto grid w-full max-w-4xl gap-6">
-        <header className="rounded-xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-6 shadow-sm shadow-slate-200/40">
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--brand-text-muted)]">Documents</p>
-          <h1 className="mt-2 text-[28px] font-medium tracking-[-0.02em] text-[var(--brand-ink)]">Upload a stored template</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--brand-text-muted)]">
-            This form posts directly to the existing FastAPI template route. The file is stored in Supabase Storage,
-            and the Python service handles the insert and upload flow already.
-          </p>
-          <div className="mt-4 text-[11px] uppercase tracking-[0.16em] text-[var(--brand-text-muted)]">
-            Session tenant: <span className="font-mono text-[var(--brand-ink)]">{tenantId ?? "Loading..."}</span>
-          </div>
-          <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-[var(--brand-text-muted)]">
-            User: <span className="font-mono text-[var(--brand-ink)]">{userEmail ?? "Unknown"}</span>
-          </div>
-        </header>
-
-        <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
-          <form
-            onSubmit={handleSubmit}
-            className="rounded-xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-6 shadow-sm shadow-slate-200/50"
-          >
-            <div className="grid gap-5 md:grid-cols-2">
-              <label className="grid gap-2">
-                <span className="text-sm font-medium text-[var(--brand-ink)]">Template name</span>
-                <input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  className="h-11 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)]"
-                  placeholder="Invoice template"
-                />
-              </label>
-
-              <label className="grid gap-2">
-                <span className="text-sm font-medium text-[var(--brand-ink)]">Template type</span>
-                <select
-                  value={docType}
-                  onChange={(event) => setDocType(event.target.value as (typeof TEMPLATE_TYPES)[number])}
-                  className="h-11 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)]"
-                >
-                  {TEMPLATE_TYPES.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="grid gap-2">
-                <span className="text-sm font-medium text-[var(--brand-ink)]">Extension</span>
-                <select
-                  value={extension}
-                  onChange={(event) => {
-                    const nextExtension = event.target.value as (typeof TEMPLATE_EXTENSIONS)[number];
-                    setExtension(nextExtension);
-                    setError("");
-
-                    if (file && !fileMatchesExtension(file, nextExtension)) {
-                      setFile(null);
-                      setError(`File selection was cleared. Choose a .${nextExtension} template file.`);
-                    }
-                  }}
-                  className="h-11 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)]"
-                >
-                  {TEMPLATE_EXTENSIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="grid gap-2">
-                <span className="text-sm font-medium text-[var(--brand-ink)]">Template file</span>
-                <input
-                  type="file"
-                  accept={FILE_ACCEPT_BY_EXTENSION[extension]}
-                  onChange={(event) => {
-                    const selectedFile = event.target.files?.[0] ?? null;
-                    setError("");
-
-                    if (!selectedFile) {
-                      setFile(null);
-                      return;
-                    }
-
-                    if (!fileMatchesExtension(selectedFile, extension)) {
-                      setFile(null);
-                      setError(`Selected file must be a .${extension} template.`);
-                      return;
-                    }
-
-                    setFile(selectedFile);
-                  }}
-                  className="block w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 py-2 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-[var(--brand-teal)] file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-[#2f8575]"
-                />
-              </label>
-            </div>
-
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <button
-                type="submit"
-                disabled={loading || !tenantId}
-                className="inline-flex h-11 items-center justify-center rounded-full bg-[var(--brand-teal)] px-5 text-sm font-medium text-white transition hover:bg-[#2f8575] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loading ? "Uploading..." : "Upload template"}
-              </button>
-              <p className="text-xs text-[var(--brand-text-muted)]">
-                Uses the existing FastAPI <span className="font-mono">POST /documents/template</span> route.
-              </p>
-            </div>
-
-            {error ? (
-              <div className="mt-5 rounded-lg border border-[#f7cccc] bg-[var(--brand-danger-bg)] px-4 py-3 text-sm text-[var(--brand-danger-text)]">
-                {error}
-              </div>
-            ) : null}
-
-            {success ? (
-              <div className="mt-5 rounded-lg border border-[#cdeade] bg-[var(--brand-teal-soft)] px-4 py-3 text-sm text-[#1a6b5a]">
-                {success}
-              </div>
-            ) : null}
-          </form>
-
-          <aside className="rounded-xl border border-[var(--brand-border)] bg-[#f9fbfc] p-6 text-[var(--brand-ink)] shadow-sm shadow-slate-200/40">
-            <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--brand-text-muted)]">Route contract</p>
-            <h2 className="mt-2 text-xl font-medium">FastAPI template upload</h2>
-            <div className="mt-5 space-y-3 text-sm leading-6 text-[var(--brand-text-muted)]">
-              <p>Fields sent as multipart form data:</p>
-              <ul className="space-y-2 text-[var(--brand-text-muted)]">
-                <li><span className="font-mono text-[var(--brand-ink)]">name</span> for the template display label.</li>
-                <li><span className="font-mono text-[var(--brand-ink)]">doc_type</span> set to invoice or offer.</li>
-                <li><span className="font-mono text-[var(--brand-ink)]">extension</span> set to xlsx or docx.</li>
-                <li><span className="font-mono text-[var(--brand-ink)]">file</span> as the selected template bytes.</li>
-              </ul>
-              <p>Tenant context is derived from the authenticated bearer token.</p>
-            </div>
-          </aside>
-        </div>
-
         <form
           onSubmit={handleInvoiceSubmit}
           className="rounded-xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-6 shadow-sm shadow-slate-200/50"
