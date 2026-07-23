@@ -27,6 +27,14 @@ jobs:
       - run: corepack enable
 
       - run: pnpm install --frozen-lockfile --filter agent...
+
+      # @prisma/client exports nothing until the client is generated, and pnpm 10
+      # blocks dependency postinstall scripts by default — on a fresh runner the module
+      # is empty and tsc fails with TS2305. Same command the agent Dockerfile runs.
+      # Generation is offline; no DATABASE_URL needed.
+      - name: Generate Prisma client
+        run: pnpm --filter agent exec prisma generate
+
       - name: Type-check agent (tsc strict, no emit)
         run: pnpm --filter agent type-check
 
