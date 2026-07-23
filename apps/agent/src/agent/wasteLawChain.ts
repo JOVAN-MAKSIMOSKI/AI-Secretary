@@ -73,9 +73,27 @@ export function buildTenantContext(profile: TenantWasteProfile): string {
 interface WasteLawChainInput {
   tenantId: string;
   userAuthId: string;
-  accessToken: string;
+  // Web path passes the caller's Supabase JWT. The Twilio voice path has no user
+  // token and instead authenticates service-to-service — leave this undefined there.
+  accessToken?: string;
   message: string;
   history: WasteLawChatMessage[];
+  // Voice mode: request a short spoken answer instead of the full legal format.
+  concise?: boolean;
+}
+
+// Chooses the auth headers for the Python call: a user Bearer JWT when the web path
+// supplies one, otherwise service-to-service auth (X-Service-Secret + X-Tenant-Id),
+// the same mechanism the Twilio extraction/STT calls already use.
+function buildAuthHeaders(input: WasteLawChainInput): Record<string, string> {
+  if (input.accessToken) {
+    return { Authorization: `Bearer ${input.accessToken}` };
+  }
+  const secret = process.env.INTER_SERVICE_SECRET;
+  if (!secret) {
+    throw new Error('INTER_SERVICE_SECRET is not configured for service-to-service waste-law call.');
+  }
+  return { 'X-Service-Secret': secret, 'X-Tenant-Id': input.tenantId };
 }
 
 // Shared by the buffered and streaming variants: resolve the tenant's waste
@@ -94,13 +112,14 @@ async function fetchWasteLawEndpoint(input: WasteLawChainInput, path: string): P
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${input.accessToken}`,
+      ...buildAuthHeaders(input),
     },
     body: JSON.stringify({
       question: input.message,
       history: input.history,
       tenant_context: tenantContext,
       top_k: WASTE_LAW_TOP_K,
+      concise: input.concise ?? false,
     }),
   });
 }

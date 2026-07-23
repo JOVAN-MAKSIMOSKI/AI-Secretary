@@ -31,3 +31,25 @@
 {"id": "voice-off-spoken", "message": "може ли да направите понуда за годишно одржување за клиентот Марко ве молам", "expect": "offer_extraction", "minConfidence": 0.5, "source": "human", "note": "Polite phone framing wrapped around the intent."}
 {"id": "voice-cal-spoken", "message": "ајде закажи ми состанок за утре попладне во три часот", "expect": "calendar_event_extraction", "minConfidence": 0.5, "source": "human", "note": "Colloquial opener, relative date, spoken time."}
 {"id": "voice-law-spoken", "message": "сакам да прашам дали ми треба дозвола за да превезувам отпад", "expect": "waste_law_query", "minConfidence": 0.5, "source": "human", "note": "Indirect question framing typical of speech."}
+
+// Read-only query chains (voice-parity plan). These READ existing data; the boundary
+// cases guard the split from their write-side siblings (task_query vs a task the UI
+// creates, calendar_query vs calendar_event_extraction, client_lookup vs the client name
+// that also appears in invoice/offer requests).
+{"id": "task-mk-remaining", "message": "Кои задачи ми преостануваат?", "expect": "task_query", "minConfidence": 0.6, "source": "human"}
+{"id": "task-en-left", "message": "What tasks do I have left to do?", "expect": "task_query", "minConfidence": 0.6, "source": "human"}
+{"id": "task-en-week-boundary", "message": "What do I still need to get done this week?", "expect": "task_query", "minConfidence": 0.5, "source": "human", "note": "Boundary vs calendar_query: 'this week' nudges calendar, but this asks about to-do items, not scheduled meetings."}
+{"id": "task-mk-nokeyword", "message": "Што ми остана недовршено?", "expect": "task_query", "minConfidence": 0.5, "source": "human", "note": "No-keyword: states 'what's unfinished' without the word задача/task."}
+{"id": "task-mk-spoken", "message": "ајде кажи ми што сѐ имам да завршам денес", "expect": "task_query", "minConfidence": 0.5, "source": "human", "note": "Spoken STT style: colloquial opener, no punctuation."}
+
+{"id": "cal-q-mk-tomorrow", "message": "Кои состаноци ги имам утре?", "expect": "calendar_query", "minConfidence": 0.6, "source": "human"}
+{"id": "cal-q-en-tomorrow", "message": "What meetings do I have tomorrow?", "expect": "calendar_query", "minConfidence": 0.6, "source": "human"}
+{"id": "cal-q-mk-scheduled-boundary", "message": "Дали имам нешто закажано за петок?", "expect": "calendar_query", "minConfidence": 0.5, "source": "human", "note": "Critical boundary vs calendar_event_extraction: 'закажано' (scheduled) reads the calendar; it must NOT be treated as a request to schedule a new event."}
+{"id": "cal-q-en-nokeyword", "message": "Who am I seeing today?", "expect": "calendar_query", "minConfidence": 0.5, "source": "human", "note": "No-keyword: asks about the day's appointments without the word meeting/calendar."}
+{"id": "cal-q-mk-spoken", "message": "може ли да ми кажеш кои состаноци ги имам за оваа недела", "expect": "calendar_query", "minConfidence": 0.5, "source": "human", "note": "Spoken polite framing, relative week window."}
+
+{"id": "client-mk-details", "message": "Кои се податоците за клиентот Марко Петров?", "expect": "client_lookup", "minConfidence": 0.6, "source": "human"}
+{"id": "client-en-contact", "message": "What's the email and phone number for client Nikola?", "expect": "client_lookup", "minConfidence": 0.6, "source": "human"}
+{"id": "client-mk-address-boundary", "message": "Кажи ми ја адресата на клиентот Тангента", "expect": "client_lookup", "minConfidence": 0.5, "source": "human", "note": "Boundary vs invoice/offer: a client name appears there too, but this only asks to read a stored detail, not to bill or quote."}
+{"id": "client-en-nokeyword", "message": "What number do I have saved for Ana Stoeva?", "expect": "client_lookup", "minConfidence": 0.5, "source": "human", "note": "No-keyword: retrieves saved contact info without the word client."}
+{"id": "client-mk-spoken", "message": "слушај кажи ми го телефонскиот број на клиентот Ана", "expect": "client_lookup", "minConfidence": 0.5, "source": "human", "note": "Spoken STT style: filler opener, no punctuation."}

@@ -9,8 +9,12 @@ import {
   buildLocalDateTime,
   calendarExtractionSchema,
 } from '../agent/calendarTime.js';
+import { parseRelativeDateRange } from '../agent/dateRangeParser.js';
 
 const SCHEMA_DEFAULT_DURATION_MINUTES = 15;
+// Fixed "now" so relative-range assertions are deterministic. A Wednesday, mid-month,
+// mid-year — far from any week/month/year boundary so the day-of-week math is unambiguous.
+const FIXED_NOW = new Date('2026-07-22T10:30:00'); // Wednesday
 
 test('buildLocalDateTime output is parseable by addMinutesToLocalDateTime', () => {
   // The real contract between the two helpers: one produces what the other consumes.
@@ -72,6 +76,55 @@ test('calendar schema defaults duration when the extractor omits it', () => {
   if (parsed.success) {
     assert.equal(parsed.data.duration_minutes, SCHEMA_DEFAULT_DURATION_MINUTES);
   }
+});
+
+const MS_PER_DAY = 24 * 60 * 60 * 1_000;
+
+test('parseRelativeDateRange resolves single-day phrases to a 24h window at local midnight', () => {
+  // Assert via getTime() against locally-constructed Dates so the test is independent of
+  // the machine timezone — toISOString() output shifts with the offset, the instant does not.
+  const cases: Array<{ message: string; dayOffset: number; why: string }> = [
+    { message: 'what meetings do I have today', dayOffset: 0, why: 'today (EN)' },
+    { message: 'кои состаноци ги имам денес', dayOffset: 0, why: 'today (MK)' },
+    { message: 'what do I have tomorrow', dayOffset: 1, why: 'tomorrow (EN)' },
+    { message: 'што имам утре', dayOffset: 1, why: 'tomorrow (MK)' },
+    { message: 'anything the day after tomorrow', dayOffset: 2, why: 'day-after (EN)' },
+    { message: 'дали имам нешто задутре', dayOffset: 2, why: 'day-after (MK)' },
+  ];
+
+  for (const { message, dayOffset, why } of cases) {
+    const range = parseRelativeDateRange(message, FIXED_NOW);
+    const expectedStart = new Date(2026, 6, 22 + dayOffset, 0, 0, 0, 0).getTime();
+    assert.equal(new Date(range.timeMin).getTime(), expectedStart, `${why}: start`);
+    assert.equal(new Date(range.timeMax).getTime() - expectedStart, MS_PER_DAY, `${why}: 24h window`);
+    assert.equal(range.matched, true, `${why}: matched`);
+  }
+});
+
+test('parseRelativeDateRange resolves week phrases to a 7-day window starting Monday', () => {
+  // FIXED_NOW is Wednesday 2026-07-22; that ISO week starts Monday 2026-07-20.
+  const thisWeek = parseRelativeDateRange('what meetings do I have this week', FIXED_NOW);
+  const expectedThisWeekStart = new Date(2026, 6, 20, 0, 0, 0, 0).getTime();
+  assert.equal(new Date(thisWeek.timeMin).getTime(), expectedThisWeekStart, 'this week starts Monday');
+  assert.equal(new Date(thisWeek.timeMax).getTime() - expectedThisWeekStart, 7 * MS_PER_DAY, 'this week is 7 days');
+
+  const nextWeek = parseRelativeDateRange('кои состаноци ги имам следната недела', FIXED_NOW);
+  const expectedNextWeekStart = new Date(2026, 6, 27, 0, 0, 0, 0).getTime();
+  assert.equal(new Date(nextWeek.timeMin).getTime(), expectedNextWeekStart, 'next week starts the following Monday');
+});
+
+test('parseRelativeDateRange falls back to a now-anchored week window when no phrase matches', () => {
+  const range = parseRelativeDateRange('what tasks do I have left', FIXED_NOW);
+  assert.equal(range.matched, false, 'no phrase matched');
+  assert.equal(new Date(range.timeMin).getTime(), FIXED_NOW.getTime(), 'default window anchors at now');
+  assert.equal(new Date(range.timeMax).getTime() - FIXED_NOW.getTime(), 7 * MS_PER_DAY, 'default window is 7 days');
+});
+
+test('parseRelativeDateRange prefers the more specific phrase over a shadowed substring', () => {
+  // "day after tomorrow" contains "tomorrow"; the more specific phrase must win.
+  const range = parseRelativeDateRange('are there meetings the day after tomorrow', FIXED_NOW);
+  const expectedStart = new Date(2026, 6, 24, 0, 0, 0, 0).getTime();
+  assert.equal(new Date(range.timeMin).getTime(), expectedStart, 'day-after-tomorrow not shadowed by tomorrow');
 });
 
 test('calendar schema rejects the payload shapes an extractor actually gets wrong', () => {

@@ -17,6 +17,9 @@ class LawChatRequest(BaseModel):
     # Python never sees raw auth tokens or reads the businesses table itself
     tenant_context: str = Field(default="", max_length=2000)
     top_k: int = Field(default=10, ge=1, le=20)
+    # Voice mode: the answer is read aloud over a phone call, so it must be a
+    # short spoken reply instead of the full numbered-list legal format.
+    concise: bool = Field(default=False)
 
 
 class LawChatResponse(BaseModel):

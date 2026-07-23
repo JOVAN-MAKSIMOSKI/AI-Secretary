@@ -17,6 +17,9 @@ import { getChainRegistry, type ChainId } from '../agent/nodes/chainRegistry.js'
 import { createCalendarEvent } from '../mcp/calendar.js';
 import { GmailReconnectRequiredError } from '../lib/gmailOAuth.js';
 import { calendarExtractionSchema } from '../agent/calendarTime.js';
+import { handleTaskQuery, handleCalendarQuery, handleClientLookup } from '../agent/chainHandlers.js';
+import { speakTaskQuery, speakCalendarQuery, speakClientLookup } from './voicePhrasing.js';
+import { runWasteLawChain } from '../agent/wasteLawChain.js';
 import {
   getOrCreateCallState,
   getCallState,
@@ -270,6 +273,45 @@ async function executeChain(
     case 'offer_extraction': {
       await callPythonExtraction('/documents/extract-offer', transcript, tenantId);
       return 'Понудата е подготвена. Можете да ја видите во вашиот панел.';
+    }
+
+    // Read-only query chains — data fetch is shared with the web path via chainHandlers;
+    // only the spoken Macedonian phrasing is voice-specific (voicePhrasing).
+    case 'task_query': {
+      const result = await handleTaskQuery(tenantId, transcript);
+      return speakTaskQuery(result);
+    }
+
+    case 'calendar_query': {
+      const result = await handleCalendarQuery(tenantId, userAuthId, transcript);
+      return speakCalendarQuery(result);
+    }
+
+    case 'client_lookup': {
+      const result = await handleClientLookup(tenantId, transcript);
+      return speakClientLookup(result);
+    }
+
+    // Waste-law advisor over the phone. No user JWT on this path, so the chain
+    // authenticates service-to-service; concise:true asks Python for a short
+    // spoken answer instead of the full numbered-list legal format.
+    case 'waste_law_query': {
+      try {
+        const { answer } = await runWasteLawChain({
+          tenantId,
+          userAuthId,
+          message: transcript,
+          history: [],
+          concise: true,
+        });
+        return answer;
+      } catch (err) {
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Waste-law voice query failed',
+        );
+        return 'Не можев да го најдам одговорот во законот во моментов. Ве молам обидете се повторно.';
+      }
     }
 
     case 'calendar_event_extraction': {

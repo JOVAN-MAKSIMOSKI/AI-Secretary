@@ -17,7 +17,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from models.rag import LawChatRequest, LawChatResponse
-from services.auth import get_current_user_id
+from services.auth import get_current_user_id, get_current_user_id_or_service
 
 logger = logging.getLogger(__name__)
 
@@ -82,13 +82,18 @@ async def rag_query(
 async def rag_chat(
     request: Request,
     payload: LawChatRequest,
-    _current_user_id: str = Depends(get_current_user_id),
+    _current_user_id: str = Depends(get_current_user_id_or_service),
 ) -> LawChatResponse:
     """Waste-law advisor chat: conversation history + tenant profile context.
 
     tenant_context arrives pre-formatted from apps/agent (which resolves the
     tenant from the JWT and reads businesses.tenantprofilecontext) — this
     service never reads the businesses table or raw auth data itself.
+
+    Dual auth (get_current_user_id_or_service): web sends a Bearer JWT, the
+    Twilio voice path authenticates service-to-service with X-Service-Secret +
+    X-Tenant-Id. The buffered endpoint is the one the voice path uses; the
+    streaming variant below stays JWT-only (browser-only surface).
     """
     import asyncio
 
@@ -111,6 +116,7 @@ async def rag_chat(
                 history=history,
                 tenant_context=payload.tenant_context,
                 similarity_top_k=payload.top_k,
+                concise=payload.concise,
             ),
         )
     except ValueError as exc:

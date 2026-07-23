@@ -1,6 +1,7 @@
 import { getChainRegistry, type ChainId } from './nodes/chainRegistry.js';
 import { resolveChainWithLlm } from './nodes/llmResolver.js';
 import { runWasteLawChain } from './wasteLawChain.js';
+import { handleTaskQuery, handleCalendarQuery, handleClientLookup } from './chainHandlers.js';
 import {
   addMinutesToLocalDateTime,
   buildLocalDateTime,
@@ -130,6 +131,15 @@ export async function runDirectResolverChain(input: {
         });
         handlerResult = { success: true, answer: wasteLawResult.answer };
       }
+      break;
+    case 'task_query':
+      handlerResult = { ...(await handleTaskQuery(input.tenantId, input.message)) };
+      break;
+    case 'calendar_query':
+      handlerResult = { ...(await handleCalendarQuery(input.tenantId, input.userAuthId, input.message)) };
+      break;
+    case 'client_lookup':
+      handlerResult = { ...(await handleClientLookup(input.tenantId, input.message)) };
       break;
     default:
       throw new Error(`No direct handler available for chain '${decision.chainId}'.`);
