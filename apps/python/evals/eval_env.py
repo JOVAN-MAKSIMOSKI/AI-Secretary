@@ -30,9 +30,15 @@ _NON_EVAL_CREDENTIAL_VARS = (
 # import time without these. The extraction path under eval never touches Supabase —
 # extract_invoice_fields_from_message(message, owner_auth_id=None) skips all client
 # enrichment — so guard values only have to satisfy the import, never a request.
+#
+# The service-role key must be JWT-shaped (three dot-separated segments): supabase-py's
+# create_client() regex-validates the key at construction and rejects a bare string with
+# "Invalid API key". A local .env with a real key masks this via setdefault(), so the
+# bad shape only surfaces in CI where no .env exists — the dummy JWT keeps both paths
+# working without ever authenticating (no network call happens at construction).
 _SUPABASE_IMPORT_GUARDS = {
     "SUPABASE_URL": "https://eval-import-guard.supabase.co",
-    "SUPABASE_SERVICE_ROLE_KEY": "eval-import-guard",
+    "SUPABASE_SERVICE_ROLE_KEY": "eval-import-guard.eval-import-guard.eval-import-guard",
 }
 
 
