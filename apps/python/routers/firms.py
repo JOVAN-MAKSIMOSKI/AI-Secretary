@@ -1,19 +1,19 @@
-"""Clients router secured by authenticated owner identity."""
+"""Firms router secured by authenticated owner identity."""
 
 import uuid as _uuid_mod
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from models.client import ClientCreateRequest, ClientResponse, ClientUpdateRequest
+from models.firm import FirmCreateRequest, FirmResponse, FirmUpdateRequest
 from services.auth import get_current_user_id
 from services.errors import safe_http_error
 from services.storage import supabase
 
-router = APIRouter(prefix="/clients", tags=["clients"])
+router = APIRouter(prefix="/firms", tags=["firms"])
 
 
-def _normalize_client_name(name: str) -> str:
+def _normalize_firm_name(name: str) -> str:
     return " ".join(name.strip().split()).casefold()
 
 
@@ -46,36 +46,36 @@ def require_tenant_owner_auth_id(tenant_identifier: str) -> str:
     return business.data[0]["owner_auth_id"]
 
 
-@router.post("", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
-def create_client(
-    payload: ClientCreateRequest,
+@router.post("", response_model=FirmResponse, status_code=status.HTTP_201_CREATED)
+def create_firm(
+    payload: FirmCreateRequest,
     current_user_id: str = Depends(get_current_user_id),
-) -> ClientResponse:
+) -> FirmResponse:
     owner_auth_id = require_tenant_owner_auth_id(current_user_id)
-    normalized_name = _normalize_client_name(payload.name)
+    normalized_name = _normalize_firm_name(payload.name)
 
-    # Prevent duplicate client names under the same tenant.
-    existing_clients = (
-        supabase.table("clients")
+    # Prevent duplicate firm names under the same tenant.
+    existing_firms = (
+        supabase.table("firms")
         .select("id, name")
         .eq("tenant_id", owner_auth_id)
         .execute()
     )
-    existing_rows = existing_clients.data or []
+    existing_rows = existing_firms.data or []
     has_duplicate_name = any(
-        _normalize_client_name(str(row.get("name", ""))) == normalized_name
+        _normalize_firm_name(str(row.get("name", ""))) == normalized_name
         for row in existing_rows
     )
 
     if has_duplicate_name:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Client name '{payload.name.strip()}' already exists for this tenant.",
+            detail=f"Firm name '{payload.name.strip()}' already exists for this tenant.",
         )
 
     try:
         response = (
-            supabase.table("clients")
+            supabase.table("firms")
             .insert(
                 {
                     "tenant_id": owner_auth_id,
@@ -86,6 +86,7 @@ def create_client(
                     "phone": payload.phone,
                     "address": payload.address,
                     "notes": payload.notes,
+                    "permit_number": payload.permit_number.strip() if payload.permit_number else None,
                 }
             )
             .execute()
@@ -93,17 +94,17 @@ def create_client(
     except HTTPException:
         raise
     except Exception as exc:
-        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to create client.") from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to create firm.") from exc
 
     data = response.data or []
     if not data:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Client insert returned no data.",
+            detail="Firm insert returned no data.",
         )
 
     created = data[0]
-    return ClientResponse(
+    return FirmResponse(
         id=created["id"],
         tenant_id=created["tenant_id"],
         name=created["name"],
@@ -113,27 +114,28 @@ def create_client(
         phone=created.get("phone"),
         address=created.get("address"),
         notes=created.get("notes"),
+        permit_number=created.get("permit_number"),
         created_at=created.get("created_at"),
     )
 
 
-@router.get("", response_model=List[ClientResponse], status_code=status.HTTP_200_OK)
-def get_clients_by_tenant(current_user_id: str = Depends(get_current_user_id)) -> List[ClientResponse]:
+@router.get("", response_model=List[FirmResponse], status_code=status.HTTP_200_OK)
+def get_firms_by_tenant(current_user_id: str = Depends(get_current_user_id)) -> List[FirmResponse]:
     owner_auth_id = require_tenant_owner_auth_id(current_user_id)
 
     try:
         response = (
-            supabase.table("clients")
+            supabase.table("firms")
             .select("*")
             .eq("tenant_id", owner_auth_id)
             .order("created_at", desc=True)
             .execute()
         )
     except Exception as exc:
-        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to query clients.") from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to query firms.") from exc
 
     return [
-        ClientResponse(
+        FirmResponse(
             id=row["id"],
             tenant_id=row["tenant_id"],
             name=row["name"],
@@ -143,24 +145,25 @@ def get_clients_by_tenant(current_user_id: str = Depends(get_current_user_id)) -
             phone=row.get("phone"),
             address=row.get("address"),
             notes=row.get("notes"),
+            permit_number=row.get("permit_number"),
             created_at=row.get("created_at"),
         )
         for row in (response.data or [])
     ]
 
 
-@router.put("/{client_id}", response_model=ClientResponse, status_code=status.HTTP_200_OK)
-def update_client_by_id(
-    client_id: str,
-    payload: ClientUpdateRequest,
+@router.put("/{firm_id}", response_model=FirmResponse, status_code=status.HTTP_200_OK)
+def update_firm_by_id(
+    firm_id: str,
+    payload: FirmUpdateRequest,
     current_user_id: str = Depends(get_current_user_id),
-) -> ClientResponse:
-    _require_uuid(client_id, "client_id")
+) -> FirmResponse:
+    _require_uuid(firm_id, "firm_id")
     owner_auth_id = require_tenant_owner_auth_id(current_user_id)
 
     try:
         response = (
-            supabase.table("clients")
+            supabase.table("firms")
             .update(
                 {
                     "name": payload.name,
@@ -170,24 +173,25 @@ def update_client_by_id(
                     "phone": payload.phone,
                     "address": payload.address,
                     "notes": payload.notes,
+                    "permit_number": payload.permit_number.strip() if payload.permit_number else None,
                 }
             )
-            .eq("id", client_id)
+            .eq("id", firm_id)
             .eq("tenant_id", owner_auth_id)
             .execute()
         )
     except Exception as exc:
-        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to update client.") from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to update firm.") from exc
 
     updated_rows = response.data or []
     if not updated_rows:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Client not found for this tenant.",
+            detail="Firm not found for this tenant.",
         )
 
     updated = updated_rows[0]
-    return ClientResponse(
+    return FirmResponse(
         id=updated["id"],
         tenant_id=updated["tenant_id"],
         name=updated["name"],
@@ -197,34 +201,35 @@ def update_client_by_id(
         phone=updated.get("phone"),
         address=updated.get("address"),
         notes=updated.get("notes"),
+        permit_number=updated.get("permit_number"),
         created_at=updated.get("created_at"),
     )
 
 
-@router.delete("/{client_id}", status_code=status.HTTP_200_OK)
-def delete_client_by_id(
-    client_id: str,
+@router.delete("/{firm_id}", status_code=status.HTTP_200_OK)
+def delete_firm_by_id(
+    firm_id: str,
     current_user_id: str = Depends(get_current_user_id),
 ) -> dict:
-    _require_uuid(client_id, "client_id")
+    _require_uuid(firm_id, "firm_id")
     owner_auth_id = require_tenant_owner_auth_id(current_user_id)
 
     try:
         response = (
-            supabase.table("clients")
+            supabase.table("firms")
             .delete()
-            .eq("id", client_id)
+            .eq("id", firm_id)
             .eq("tenant_id", owner_auth_id)
             .execute()
         )
     except Exception as exc:
-        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to delete client.") from exc
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to delete firm.") from exc
 
     deleted_rows = response.data or []
     if not deleted_rows:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Client not found for this tenant.",
+            detail="Firm not found for this tenant.",
         )
 
-    return {"id": client_id, "status": "deleted"}
+    return {"id": firm_id, "status": "deleted"}

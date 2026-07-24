@@ -1,11 +1,11 @@
-"""Pydantic models for /clients endpoints."""
+"""Pydantic models for /firms endpoints."""
 
 import re
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 # Basic email shape that also forbids CR/LF — a stored address containing newlines could
-# be used for header injection when the client is later emailed (see apps/agent mcp/gmail.ts).
+# be used for header injection when the firm is later emailed (see apps/agent mcp/gmail.ts).
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
@@ -16,7 +16,7 @@ def _validate_email(value: str) -> str:
     return cleaned
 
 
-class ClientCreateRequest(BaseModel):
+class FirmCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=254)
     city: str | None = Field(default=None, max_length=120)
@@ -24,6 +24,7 @@ class ClientCreateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     address: str | None = Field(default=None, max_length=255)
     notes: str | None = Field(default=None, max_length=1000)
+    permit_number: str | None = Field(default=None, max_length=60)
 
     @field_validator("email")
     @classmethod
@@ -31,7 +32,7 @@ class ClientCreateRequest(BaseModel):
         return _validate_email(value)
 
 
-class ClientUpdateRequest(BaseModel):
+class FirmUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=254)
     city: str | None = Field(default=None, max_length=120)
@@ -39,6 +40,7 @@ class ClientUpdateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     address: str | None = Field(default=None, max_length=255)
     notes: str | None = Field(default=None, max_length=1000)
+    permit_number: str | None = Field(default=None, max_length=60)
 
     @field_validator("email")
     @classmethod
@@ -46,7 +48,7 @@ class ClientUpdateRequest(BaseModel):
         return _validate_email(value)
 
 
-class ClientResponse(BaseModel):
+class FirmResponse(BaseModel):
     id: str
     tenant_id: str
     name: str
@@ -56,4 +58,5 @@ class ClientResponse(BaseModel):
     phone: str | None = None
     address: str | None = None
     notes: str | None = None
+    permit_number: str | None = None
     created_at: datetime | None = None

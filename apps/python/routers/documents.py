@@ -267,34 +267,34 @@ def create_invoice(
     inserted_new_invoice = False
 
     if payload is not None:
-        client_result = (
-            supabase.table("clients")
+        firm_result = (
+            supabase.table("firms")
             .select("id, name, tax_number, address, city")
-            .eq("id", payload.client_id)
+            .eq("id", payload.firm_id)
             .eq("tenant_id", resolved_owner_auth_id)
             .limit(1)
             .execute()
         )
-        if not client_result.data:
+        if not firm_result.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Client not found for this tenant.",
+                detail="Firm not found for this tenant.",
             )
 
-        client_row = client_result.data[0]
-        stored_name = str(client_row.get("name") or "").strip()
-        stored_tax_number = str(client_row.get("tax_number") or "").strip()
+        firm_row = firm_result.data[0]
+        stored_name = str(firm_row.get("name") or "").strip()
+        stored_tax_number = str(firm_row.get("tax_number") or "").strip()
 
-        if stored_name != payload.client_name.strip():
+        if stored_name != payload.firm_name.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="client_name does not match the selected client.",
+                detail="firm_name does not match the selected firm.",
             )
 
-        if stored_tax_number != payload.client_tax_number.strip():
+        if stored_tax_number != payload.firm_tax_number.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="client_tax_number does not match the selected client.",
+                detail="firm_tax_number does not match the selected firm.",
             )
 
         try:
@@ -313,7 +313,7 @@ def create_invoice(
             supabase.table("invoices")
             .select("id")
             .eq("tenant_id", resolved_owner_auth_id)
-            .eq("client_id", payload.client_id)
+            .eq("firm_id", payload.firm_id)
             .eq("invoice_number", payload.invoice_number)
             .order("created_at", desc=True)
             .limit(1)
@@ -322,7 +322,7 @@ def create_invoice(
 
         invoice_common_data = {
             "tenant_id": resolved_owner_auth_id,
-            "client_id": payload.client_id,
+            "firm_id": payload.firm_id,
             "invoice_number": payload.invoice_number,
             "invoice_type": payload.invoice_type,
             "invoice_date": payload.invoice_date.isoformat(),
@@ -379,8 +379,8 @@ def create_invoice(
             "invoice_year": invoice_year,
             "consignment_note_number": payload.consignment_note_number,
             "order_number": payload.order_number,
-            "client_name": payload.client_name,
-            "client_tax_number": payload.client_tax_number,
+            "firm_name": payload.firm_name,
+            "firm_tax_number": payload.firm_tax_number,
             "description": payload.description,
             "units": payload.units,
             "price_per_unit": payload.price_per_unit,
@@ -389,11 +389,11 @@ def create_invoice(
             "price_before_tax": payload.price_before_tax,
             "price_after_tax": payload.price_after_tax,
             "price_after_tax_text": generated_price_after_tax_text,
-            "client": {
-                "name": payload.client_name,
-                "address": client_row.get("address"),
-                "city": client_row.get("city"),
-                "taxnumber": payload.client_tax_number,
+            "firm": {
+                "name": payload.firm_name,
+                "address": firm_row.get("address"),
+                "city": firm_row.get("city"),
+                "taxnumber": payload.firm_tax_number,
             },
             "business": business_values.get("business", {}),
         }
@@ -502,20 +502,39 @@ def create_template(
     file: UploadFile = File(...),
     current_user_id: str = Depends(get_current_user_id),
 ) -> DocumentResponse:
-    """Upload and save a document template (invoice or offer)."""
+    """Upload and save a document template (invoice, offer, or a waste form)."""
     tenant_id_str = str(UUID(current_user_id))
 
+    # Each doc_type maps to its own per-tenant template table. The two waste forms are
+    # Excel-only (no Word variant), so they are constrained to .xlsx below.
+    template_table_by_doc_type = {
+        "invoice": "templatesInvoice",
+        "offer": "templatesOffer",
+        "transport_form": "templatesTransportForm",
+        "identification_form": "templatesIdentificationForm",
+    }
+    xlsx_only_doc_types = {"transport_form", "identification_form"}
+
     # Validate doc_type and extension
-    if doc_type not in ["invoice", "offer"]:
+    if doc_type not in template_table_by_doc_type:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="doc_type must be 'invoice' or 'offer'.",
+            detail="doc_type must be one of "
+            + ", ".join(f"'{key}'" for key in template_table_by_doc_type)
+            + ".",
         )
 
-    if extension.lower().lstrip(".") not in ["xlsx", "docx"]:
+    normalized_extension = extension.lower().lstrip(".")
+    if normalized_extension not in ["xlsx", "docx"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="extension must be 'xlsx' or 'docx'.",
+        )
+
+    if doc_type in xlsx_only_doc_types and normalized_extension != "xlsx":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"doc_type '{doc_type}' only supports the 'xlsx' extension.",
         )
 
     # Verify tenant exists by canonical tenant identity (owner_auth_id).
@@ -556,10 +575,10 @@ def create_template(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Determine table name based on doc_type
-    table_name = "templatesInvoice" if doc_type == "invoice" else "templatesOffer"
+    table_name = template_table_by_doc_type[doc_type]
 
     storage_path = (
-        f"{owner_auth_id}/templates/{template_id}.{extension.lower().lstrip('.')}"
+        f"{owner_auth_id}/templates/{template_id}.{normalized_extension}"
     )
     inserted = False
     data = []

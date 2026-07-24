@@ -11,7 +11,7 @@ from uuid import UUID
 from openpyxl import load_workbook
 
 from services.invoices.calculations import apply_invoice_price_calculations
-from services.invoices.client_lookup import fetch_client_contact_from_extracted
+from services.invoices.firm_lookup import fetch_firm_contact_from_extracted
 from services.invoices.mk_numbers import contains_mk_number_words, normalize_mk_number_words
 from langchain import run_invoice_extraction
 from services.storage import supabase
@@ -23,7 +23,7 @@ EXTRACTED_USER_MESSAGE_KEYS: tuple[str, ...] = (
     "value_date",
     "consignment_note_number",
     "order_number",
-    "client_name",
+    "firm_name",
     "description",
     "units",
     "price_per_unit",
@@ -54,23 +54,23 @@ CALCULATION_OUTPUT_KEYS: tuple[str, ...] = (
     "price_after_tax",
 )
 
-# Values used by client lookup service (services/invoices/client_lookup.py).
-CLIENT_LOOKUP_INPUT_KEYS: tuple[str, ...] = (
-    "client_name",
+# Values used by firm lookup service (services/invoices/firm_lookup.py).
+FIRM_LOOKUP_INPUT_KEYS: tuple[str, ...] = (
+    "firm_name",
 )
 
-CLIENT_LOOKUP_OUTPUT_KEYS: tuple[str, ...] = (
-    "client_id",
-    "client_name",
-    "client_tax_number",
-    "client_email",
+FIRM_LOOKUP_OUTPUT_KEYS: tuple[str, ...] = (
+    "firm_id",
+    "firm_name",
+    "firm_tax_number",
+    "firm_email",
 )
 
 ALL_INVOICE_ENRICHMENT_KEYS: tuple[str, ...] = (
     *EXTRACTED_USER_MESSAGE_KEYS,
     *DERIVED_EXTRACTION_KEYS,
     *CALCULATION_OUTPUT_KEYS,
-    *CLIENT_LOOKUP_OUTPUT_KEYS,
+    *FIRM_LOOKUP_OUTPUT_KEYS,
     *BUSINESS_OUTPUT_KEYS,
 )
 
@@ -449,13 +449,13 @@ def _add_template_aliases(replacements: dict[str, str]) -> dict[str, str]:
     _add_alias(replacements, "business.depositor", "Business.depositor")
     _add_alias(replacements, "business.invoice_counter", "Business.invoice_counter")
 
-    # Client aliases from extracted + looked-up fields.
-    _add_alias(replacements, "client.name", "Client.name")
-    _add_alias(replacements, "client.address", "Client.address")
-    _add_alias(replacements, "client.city", "Client.city")
-    _add_alias(replacements, "client.taxnumber", "Client.taxnumber")
-    _add_alias(replacements, "client_name", "Client.name")
-    _add_alias(replacements, "client_tax_number", "Client.taxnumber")
+    # Firm aliases from extracted + looked-up fields.
+    _add_alias(replacements, "firm.name", "Firm.name")
+    _add_alias(replacements, "firm.address", "Firm.address")
+    _add_alias(replacements, "firm.city", "Firm.city")
+    _add_alias(replacements, "firm.taxnumber", "Firm.taxnumber")
+    _add_alias(replacements, "firm_name", "Firm.name")
+    _add_alias(replacements, "firm_tax_number", "Firm.taxnumber")
 
     # Invoice aliases mapped to current payload field names.
     _add_alias(replacements, "invoice_number", "Invoice.number")
@@ -550,16 +550,16 @@ def extract_invoice_fields_from_message(
         extracted["invoice_year"] = extracted_date.year
 
     if owner_auth_id:
-        if isinstance(extracted.get("client_name"), str):
+        if isinstance(extracted.get("firm_name"), str):
             try:
                 extracted.update(
-                    fetch_client_contact_from_extracted(
+                    fetch_firm_contact_from_extracted(
                         owner_auth_id,
                         extracted,
                     )
                 )
             except ValueError:
-                # Keep extraction response usable even when client lookup cannot resolve a match.
+                # Keep extraction response usable even when firm lookup cannot resolve a match.
                 pass
         extracted.update(fetch_business_values(owner_auth_id))
 

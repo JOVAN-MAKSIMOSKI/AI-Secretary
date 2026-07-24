@@ -67,6 +67,8 @@ class BusinessProfileUpdateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     address: str | None = Field(default=None, max_length=255)
     logo_url: str | None = Field(default=None, max_length=1000)
+    dangerous_waste_permit_number: str | None = Field(default=None, max_length=60)
+    permit_number: str | None = Field(default=None, max_length=60)
     tenantprofilecontext: WasteProfileContext | None = None
 
 
@@ -81,6 +83,8 @@ class BusinessProfileResponse(BaseModel):
     phone: str | None = None
     address: str | None = None
     logo_url: str | None = None
+    dangerous_waste_permit_number: str | None = None
+    permit_number: str | None = None
     plan: str
     tenantprofilecontext: dict | None = None
     created_at: datetime | None = None

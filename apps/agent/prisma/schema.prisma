@@ -14,7 +14,7 @@ enum InvoiceType {
   @@schema("public")
 }
 
-model clients {
+model firms {
   id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id  String     @db.Uuid
   name       String
@@ -24,10 +24,15 @@ model clients {
   phone      String?
   address    String?
   notes      String?
+  // Waste-management permit number of the firm. Text (not numeric) to preserve
+  // leading zeros / separators. Read onto identification forms via firm_id.
+  permit_number String?
   created_at DateTime   @default(now()) @db.Timestamptz(6)
   businesses businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
   invoices   invoices[]
   offers     offers[]
+  transport_forms transport_forms[]
+  identification_forms identification_forms[]
 
   @@index([tenant_id])
   @@schema("public")
@@ -36,7 +41,7 @@ model clients {
 model invoices {
   id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id   String     @db.Uuid
-  client_id   String     @default(uuid()) @db.Uuid
+  firm_id     String     @default(uuid()) @db.Uuid
   invoice_number String?
   invoice_type   InvoiceType?
   invoice_date   DateTime?  @db.Date
@@ -62,18 +67,18 @@ model invoices {
   origin        String    @default("manual")
   downloaded_at DateTime? @db.Timestamptz(6)
   created_at    DateTime  @default(now()) @db.Timestamptz(6)
-  clients     clients    @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  firms       firms      @relation(fields: [firm_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   templates   templatesInvoice? @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   businesses  businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([client_id])
+  @@index([firm_id])
   @@index([tenant_id])
   @@schema("public")
 }
 model offers {
   id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id   String     @db.Uuid
-  client_id   String     @default(uuid()) @db.Uuid
+  firm_id     String     @default(uuid()) @db.Uuid
   title       String
   status      String     @default("draft")
   file_url    String?
@@ -85,11 +90,11 @@ model offers {
   storagePath String   @unique
   sizeBytes   BigInt?
   created_at  DateTime   @default(now()) @db.Timestamptz(6)
-  clients     clients    @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  firms       firms      @relation(fields: [firm_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   templates   templatesOffer? @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   businesses  businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([client_id])
+  @@index([firm_id])
   @@index([tenant_id])
   @@schema("public")
 }
@@ -126,6 +131,41 @@ model templatesInvoice {
   @@schema("public")
 }
 
+// Per-tenant stored template for the waste transport form. Same shape as
+// templatesInvoice — an uploaded .xlsx with {{placeholder}} tokens. No render step
+// yet, so nothing relates back to it besides the tenant.
+model templatesTransportForm {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id   String     @db.Uuid
+  name        String
+  content     String
+  storagePath String     @unique
+  sizeBytes   BigInt?
+  type        String
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+  businesses  businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id])
+  @@schema("public")
+}
+
+// Per-tenant stored template for the waste identification form. Same shape as
+// templatesInvoice.
+model templatesIdentificationForm {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id   String     @db.Uuid
+  name        String
+  content     String
+  storagePath String     @unique
+  sizeBytes   BigInt?
+  type        String
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+  businesses  businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id])
+  @@schema("public")
+}
+
 model businesses {
   id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   owner_auth_id String     @unique @db.Uuid
@@ -137,21 +177,142 @@ model businesses {
   phone         String?
   address       String?
   logo_url      String?
+  // Waste-management permit numbers, entered from the Settings UI. Stored as text
+  // (not Int) to preserve leading zeros / separators in official permit numbers.
+  dangerous_waste_permit_number String?
+  permit_number                 String?
   plan          String     @default("free")
   // Waste-law advisor profile (entity type, sector, waste types, volume…) —
   // formatted into the RAG prompt as tenant context; null = not yet set up
   tenantprofilecontext Json? @db.JsonB
   created_at    DateTime   @default(now()) @db.Timestamptz(6)
-  clients       clients[]
+  firms         firms[]
   invoices      invoices[]
   templatesInvoice  templatesInvoice[]
   templatesOffer    templatesOffer[]
+  templatesTransportForm       templatesTransportForm[]
+  templatesIdentificationForm  templatesIdentificationForm[]
   offers        offers[]
   gmail_oauth_connections gmail_oauth_connections[]
   tasks                   tasks[]
   audit_logs              audit_logs[]
+  disposal_places         disposal_places[]
+  contacts                contacts[]
+  transport_forms         transport_forms[]
+  identification_forms    identification_forms[]
 
   @@index([phone])
+  @@schema("public")
+}
+
+model contacts {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id    String     @db.Uuid
+  name         String
+  email        String
+  // Text, not numeric: preserves leading zeros, '+' country codes, and separators.
+  phone_number String
+  address      String
+  created_at   DateTime   @default(now()) @db.Timestamptz(6)
+  businesses   businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+  identification_forms identification_forms[]
+
+  @@index([tenant_id])
+  @@schema("public")
+}
+
+// Waste transport manifest. Treated like invoices: it REFERENCES parties by FK id
+// rather than snapshotting their details. Waste owner = firm_id, end owner =
+// disposal_place_id, collector = the tenant itself (tenant_id; its permit is read
+// from businesses.permit_number / dangerous_waste_permit_number at render, chosen by
+// is_hazardous). Only data that lives on no other table is stored: waste
+// classification, the per-party kg + dates, and note. begin_end_location is derived
+// (firm.address - disposal_place.address) at render, not stored. waste_type/ewc_code
+// are validated against the TS unions in src/agent/wasteChapters.ts before insert.
+model transport_forms {
+  id                String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id         String @db.Uuid
+  firm_id           String @db.Uuid
+  disposal_place_id String @db.Uuid
+
+  // Waste classification (not on any table — stored here)
+  waste_type   String
+  is_hazardous Boolean
+  ewc_code     String
+
+  // Per-party weights and dates (form data, not derivable from any table)
+  waste_owner_total_kg Decimal  @db.Decimal(12, 2)
+  waste_owner_date     DateTime @db.Date
+  collector_total_kg   Decimal  @db.Decimal(12, 2)
+  collector_date       DateTime @db.Date
+  end_owner_total_kg   Decimal  @db.Decimal(12, 2)
+  end_owner_date       DateTime @db.Date
+
+  note String?
+
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  firms           firms           @relation(fields: [firm_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  disposal_places disposal_places @relation(fields: [disposal_place_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  businesses      businesses      @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id])
+  @@index([firm_id])
+  @@index([disposal_place_id])
+  @@schema("public")
+}
+
+// Waste identification form. Like invoices/transport_forms: REFERENCES parties by FK
+// id rather than snapshotting. Waste owner = firm_id (name/address/permit read from the
+// firm at render), responsible person = contact_id (name/phone/email read from the
+// contact). Only data on no other table is stored: waste_location and the wasteInfo
+// fields. Reference strings (waste_type, ewc_code, packing_method, waste_origin,
+// waste_operation_code) are validated against the TS unions in src/agent/wasteChapters.ts.
+model identification_forms {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String @db.Uuid
+  firm_id    String @db.Uuid
+  contact_id String @db.Uuid
+
+  // Waste owner detail not on any table
+  waste_location String
+
+  // Waste info (all stored — not derivable from any table)
+  is_hazardous         Boolean
+  waste_type           String
+  ewc_code             String
+  packing_method       String
+  total_weight_kg      Decimal  @db.Decimal(12, 2)
+  waste_origin         String
+  waste_operation_code String
+  place                String
+  date                 DateTime @db.Date
+
+  created_at DateTime   @default(now()) @db.Timestamptz(6)
+  firms      firms      @relation(fields: [firm_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  contacts   contacts   @relation(fields: [contact_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  businesses businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id])
+  @@index([firm_id])
+  @@index([contact_id])
+  @@schema("public")
+}
+
+model disposal_places {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id    String     @db.Uuid
+  name         String
+  address      String
+  place        String
+  email        String
+  // Text, not numeric: preserves leading zeros, '+' country codes, and separators
+  // in phone numbers (same reason firms.phone is a String).
+  phone_number String
+  created_at   DateTime   @default(now()) @db.Timestamptz(6)
+  businesses   businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+  transport_forms transport_forms[]
+
+  @@index([tenant_id])
   @@schema("public")
 }
 

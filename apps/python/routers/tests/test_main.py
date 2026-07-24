@@ -18,7 +18,7 @@ def print_request_response(response):
 
 
 def test_root(capsys):
-    response = client.get("/clients")
+    response = client.get("/firms")
 
     # Disable pytest capture for this block so it always prints to console.
     with capsys.disabled():

@@ -5,7 +5,7 @@ import Callback from "./pages/auth/Callback";
 import Login from "./pages/auth/Login";
 import SignUp from "./pages/auth/SignUp";
 import PortalCalendar from "./pages/portal/Calendar.tsx";
-import PortalClients from "./pages/portal/Clients";
+import PortalParties from "./pages/portal/Parties";
 import PortalDashboard from "./pages/portal/Dashboard";
 import PortalDocuments from "./pages/portal/Documents";
 import PortalContact from "./pages/portal/Contact";
@@ -46,7 +46,7 @@ export default function App() {
         >
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<PortalDashboard />} />
-          <Route path="clients" element={<PortalClients />} />
+          <Route path="parties" element={<PortalParties />} />
           <Route path="documents" element={<PortalDocuments />} />
           <Route path="calendar" element={<PortalCalendar />} />
           <Route path="contact" element={<PortalContact />} />

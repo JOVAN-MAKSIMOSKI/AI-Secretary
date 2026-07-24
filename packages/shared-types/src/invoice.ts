@@ -6,7 +6,7 @@ export type InvoiceType = 'goods' | 'transport';
 export interface Invoice {
   id: string;
   tenant_id: string;
-  client_id: string;
+  firm_id: string;
   invoice_number: string | null;
   invoice_type: InvoiceType | null;
   invoice_date: string | null;

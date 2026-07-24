@@ -152,33 +152,33 @@ export async function sendDocumentToClient(
       return { success: false, error: `Tenant '${tenantId}' not found` };
     }
 
-    // Get client
-    const clientResponse = await supabase
-      .from('clients')
+    // Get firm
+    const firmResponse = await supabase
+      .from('firms')
       .select('id,name,email')
       .eq('id', clientId)
       .eq('tenant_id', business.owner_auth_id)
       .maybeSingle();
 
-    const client = clientResponse.data;
+    const firm = firmResponse.data;
 
-    if (clientResponse.error) {
+    if (firmResponse.error) {
       return {
         success: false,
-        error: `Failed to resolve client: ${clientResponse.error.message}`,
+        error: `Failed to resolve firm: ${firmResponse.error.message}`,
       };
     }
 
-    if (!client) {
-      return { success: false, error: `Client '${clientId}' not found for this tenant` };
+    if (!firm) {
+      return { success: false, error: `Firm '${clientId}' not found for this tenant` };
     }
 
-    const recipientEmail = String(client.email ?? '').trim();
+    const recipientEmail = String(firm.email ?? '').trim();
 
     if (!recipientEmail) {
       return {
         success: false,
-        error: `Client '${clientId}' has no email address configured`,
+        error: `Firm '${clientId}' has no email address configured`,
       };
     }
 
@@ -187,7 +187,7 @@ export async function sendDocumentToClient(
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
       return {
         success: false,
-        error: `Client '${clientId}' has invalid email '${recipientEmail}'`,
+        error: `Firm '${clientId}' has invalid email '${recipientEmail}'`,
       };
     }
 
@@ -215,7 +215,7 @@ export async function sendDocumentToClient(
     // Prepare email
     const subject = `${documentType === 'invoice' ? 'Invoice' : 'Offer'}: ${document.title}`;
     const body = `
-Dear ${client.name},
+Dear ${firm.name},
 
 Please find attached the ${documentType} for your review.
 
@@ -349,7 +349,7 @@ export async function listSentDocuments(
       id,
       title,
       sent_at,
-      clients (email)
+      firms (email)
     `
     )
     .eq('tenant_id', business.owner_auth_id)
@@ -364,7 +364,7 @@ export async function listSentDocuments(
   return (data || []).map((row: any) => ({
     id: row.id,
     title: row.title,
-    client_email: row.clients?.email || 'unknown',
+    client_email: row.firms?.email || 'unknown',
     sent_at: row.sent_at,
   }));
 }

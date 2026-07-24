@@ -81,7 +81,7 @@ export async function handleCalendarQuery(
 }
 
 // Normalises a name for matching: collapse whitespace, drop case/accents. Mirrors the
-// intent of _normalize_client_name in apps/python/routers/clients.py, reimplemented in TS
+// intent of _normalize_firm_name in apps/python/routers/firms.py, reimplemented in TS
 // so a simple name lookup needs no Python round-trip.
 function normalizeName(name: string): string {
   return name
@@ -92,8 +92,8 @@ function normalizeName(name: string): string {
     .toLowerCase();
 }
 
-export async function handleClientLookup(tenantId: string, message: string): Promise<ChainHandlerResult> {
-  const clients = await prisma.clients.findMany({
+export async function handleFirmLookup(tenantId: string, message: string): Promise<ChainHandlerResult> {
+  const firms = await prisma.firms.findMany({
     where: { tenant_id: tenantId },
     select: {
       id: true,
@@ -110,13 +110,13 @@ export async function handleClientLookup(tenantId: string, message: string): Pro
   const normalizedMessage = normalizeName(message);
 
   // Prefer the longest stored name that appears in the message — "Marko Petrov" wins over
-  // a client merely named "Marko" when both are substrings of what the caller said.
-  let best: (typeof clients)[number] | null = null;
+  // a firm merely named "Marko" when both are substrings of what the caller said.
+  let best: (typeof firms)[number] | null = null;
   let bestLength = 0;
-  for (const client of clients) {
-    const normalizedName = normalizeName(client.name);
+  for (const firm of firms) {
+    const normalizedName = normalizeName(firm.name);
     if (normalizedName && normalizedMessage.includes(normalizedName) && normalizedName.length > bestLength) {
-      best = client;
+      best = firm;
       bestLength = normalizedName.length;
     }
   }
@@ -125,5 +125,5 @@ export async function handleClientLookup(tenantId: string, message: string): Pro
     return { success: false, data: {}, message: 'not_found' };
   }
 
-  return { success: true, data: { client: best } };
+  return { success: true, data: { firm: best } };
 }

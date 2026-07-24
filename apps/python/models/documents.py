@@ -12,15 +12,15 @@ PG_INT4_MAX = 2147483647
 
 
 class InvoiceRequest(BaseModel):
-    client_id: str
+    firm_id: str
     invoice_number: str = Field(pattern=r"^\d{3,}/\d+$")
     invoice_type: Literal["goods", "transport"]
     invoice_date: date
     value_date: date
     consignment_note_number: Optional[int] = Field(default=None, ge=0, le=PG_INT4_MAX)
     order_number: Optional[int] = Field(default=None, ge=0, le=PG_INT4_MAX)
-    client_name: str = Field(min_length=1, max_length=120)
-    client_tax_number: str = Field(min_length=1, max_length=60)
+    firm_name: str = Field(min_length=1, max_length=120)
+    firm_tax_number: str = Field(min_length=1, max_length=60)
     description: str = Field(min_length=1, max_length=2000)
     units: int = Field(ge=0, le=PG_INT4_MAX)
     price_per_unit: Decimal = Field(ge=0, decimal_places=2, max_digits=12)
@@ -61,8 +61,8 @@ class InvoiceRequest(BaseModel):
 
     @field_validator(
         "invoice_number",
-        "client_name",
-        "client_tax_number",
+        "firm_name",
+        "firm_tax_number",
         "description",
         mode="before",
     )
@@ -108,7 +108,7 @@ class ExtractionResponse(BaseModel):
 
 class OfferRequest(BaseModel):
     tenant_id: str
-    client_id: str
+    firm_id: str
     title: str
     amount: Optional[float] = None
     due_date: Optional[datetime] = None

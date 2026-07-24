@@ -202,8 +202,8 @@ function applySingleNumberFollowUp(
 function buildInvoicePayloadFromExtraction(
   extracted: ExtractedInvoiceFromMessage
 ): { payload?: InvoiceDocumentRequest; error?: string } {
-  const clientName = normalizeOptionalText(extracted.client_name);
-  const clientTaxNumber = normalizeOptionalText(extracted.client_tax_number);
+  const clientName = normalizeOptionalText(extracted.firm_name);
+  const clientTaxNumber = normalizeOptionalText(extracted.firm_tax_number);
   const description = normalizeOptionalText(extracted.description) ?? "Invoice items";
   const units = parseIntegerish(extracted.units);
   const pricePerUnit = parseNumberish(extracted.price_per_unit);
@@ -213,14 +213,14 @@ function buildInvoicePayloadFromExtraction(
   const orderNumber = parseIntegerish(extracted.order_number) ?? null;
   const consignmentNoteNumber = parseIntegerish(extracted.consignment_note_number) ?? null;
 
-  if (!extracted.client_id) {
-    return { error: "I found invoice values, but I could not resolve a client_id from client_name." };
+  if (!extracted.firm_id) {
+    return { error: "I found invoice values, but I could not resolve a firm_id from firm_name." };
   }
   if (!clientName) {
-    return { error: "Missing client_name in extracted data." };
+    return { error: "Missing firm_name in extracted data." };
   }
   if (!clientTaxNumber) {
-    return { error: "Missing client_tax_number in extracted data." };
+    return { error: "Missing firm_tax_number in extracted data." };
   }
 
   if (units === null || pricePerUnit === null) {
@@ -243,15 +243,15 @@ function buildInvoicePayloadFromExtraction(
   const nextInvoiceCounter = String(invoiceCounter + 1).padStart(3, "0");
 
   const payload: InvoiceDocumentRequest = {
-    client_id: extracted.client_id,
+    firm_id: extracted.firm_id,
     invoice_number: `${nextInvoiceCounter}/${invoiceYear}`,
     invoice_type: extracted.invoice_type ?? "goods",
     invoice_date: new Date().toISOString().slice(0, 10),
     value_date: extracted.value_date ? formatDateIso(extracted.value_date) : new Date().toISOString().slice(0, 10),
     consignment_note_number: consignmentNoteNumber,
     order_number: orderNumber,
-    client_name: clientName,
-    client_tax_number: clientTaxNumber,
+    firm_name: clientName,
+    firm_tax_number: clientTaxNumber,
     description,
     units,
     price_per_unit: pricePerUnit,

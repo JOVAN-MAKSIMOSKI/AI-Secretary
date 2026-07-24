@@ -1,4 +1,4 @@
-"""Client lookup helpers for invoice orchestration."""
+"""Firm lookup helpers for invoice orchestration."""
 
 from __future__ import annotations
 
@@ -117,11 +117,11 @@ def _normalize_name_tokens(value: str) -> list[str]:
     return tokens
 
 
-def _normalize_client_name(value: str) -> str:
+def _normalize_firm_name(value: str) -> str:
     tokens = _normalize_name_tokens(value)
     normalized = " ".join(tokens)
     if not normalized:
-        raise ValueError("Extracted client_name is empty.")
+        raise ValueError("Extracted firm_name is empty.")
     return normalized
 
 
@@ -212,13 +212,13 @@ def _select_best_fuzzy_match(rows: list[dict[str, Any]], normalized_target: str)
     return None
 
 
-def fetch_client_contact_by_name(owner_auth_id: str, client_name: str) -> dict[str, Any]:
-    """Fetch client id, tax number, and email for a tenant by client name."""
-    normalized_name = _normalize_client_name(client_name)
-    raw_name = " ".join(client_name.strip().split())
+def fetch_firm_contact_by_name(owner_auth_id: str, firm_name: str) -> dict[str, Any]:
+    """Fetch firm id, tax number, and email for a tenant by firm name."""
+    normalized_name = _normalize_firm_name(firm_name)
+    raw_name = " ".join(firm_name.strip().split())
 
     exact_response = (
-        supabase.table("clients")
+        supabase.table("firms")
         .select("id, name, tax_number, email")
         .eq("tenant_id", owner_auth_id)
         .eq("name", raw_name)
@@ -229,7 +229,7 @@ def fetch_client_contact_by_name(owner_auth_id: str, client_name: str) -> dict[s
 
     if not rows:
         fallback_response = (
-            supabase.table("clients")
+            supabase.table("firms")
             .select("id, name, tax_number, email")
             .eq("tenant_id", owner_auth_id)
             .ilike("name", f"%{raw_name}%")
@@ -243,11 +243,11 @@ def fetch_client_contact_by_name(owner_auth_id: str, client_name: str) -> dict[s
         # loading the full client table. The raw (non-transliterated) token is used
         # deliberately: ilike runs against the stored name column, which may be
         # Cyrillic or Latin — the raw input is more likely to share the same script.
-        raw_tokens = client_name.strip().split()
-        raw_anchor = max(raw_tokens, key=len) if raw_tokens else client_name.strip()
+        raw_tokens = firm_name.strip().split()
+        raw_anchor = max(raw_tokens, key=len) if raw_tokens else firm_name.strip()
 
         fuzzy_response = (
-            supabase.table("clients")
+            supabase.table("firms")
             .select("id, name, tax_number, email")
             .eq("tenant_id", owner_auth_id)
             .ilike("name", f"%{raw_anchor}%")
@@ -261,7 +261,7 @@ def fetch_client_contact_by_name(owner_auth_id: str, client_name: str) -> dict[s
         # transliteration-aware scorer can still find a match.
         if not fuzzy_rows:
             fallback_all = (
-                supabase.table("clients")
+                supabase.table("firms")
                 .select("id, name, tax_number, email")
                 .eq("tenant_id", owner_auth_id)
                 .limit(MAX_FUZZY_CANDIDATES)
@@ -271,7 +271,7 @@ def fetch_client_contact_by_name(owner_auth_id: str, client_name: str) -> dict[s
 
         if len(fuzzy_rows) == MAX_FUZZY_CANDIDATES:
             logger.warning(
-                "Fuzzy client lookup hit cap of %d rows for tenant '%s' (anchor=%r)",
+                "Fuzzy firm lookup hit cap of %d rows for tenant '%s' (anchor=%r)",
                 MAX_FUZZY_CANDIDATES,
                 owner_auth_id,
                 raw_anchor,
@@ -285,25 +285,25 @@ def fetch_client_contact_by_name(owner_auth_id: str, client_name: str) -> dict[s
 
     if not rows:
         raise ValueError(
-            f"No client found for tenant '{owner_auth_id}' with name '{client_name}'."
+            f"No firm found for tenant '{owner_auth_id}' with name '{firm_name}'."
         )
 
     row = rows[0]
     return {
-        "client_id": row.get("id"),
-        "client_name": row.get("name"),
-        "client_tax_number": row.get("tax_number"),
-        "client_email": row.get("email"),
+        "firm_id": row.get("id"),
+        "firm_name": row.get("name"),
+        "firm_tax_number": row.get("tax_number"),
+        "firm_email": row.get("email"),
     }
 
 
-def fetch_client_contact_from_extracted(
+def fetch_firm_contact_from_extracted(
     owner_auth_id: str,
     extracted_fields: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Resolve client details using client_name from LangChain extraction output."""
-    raw_client_name = extracted_fields.get("client_name")
-    if not isinstance(raw_client_name, str):
-        raise ValueError("Extracted fields do not contain a valid client_name.")
+    """Resolve firm details using firm_name from LangChain extraction output."""
+    raw_firm_name = extracted_fields.get("firm_name")
+    if not isinstance(raw_firm_name, str):
+        raise ValueError("Extracted fields do not contain a valid firm_name.")
 
-    return fetch_client_contact_by_name(owner_auth_id, raw_client_name)
+    return fetch_firm_contact_by_name(owner_auth_id, raw_firm_name)

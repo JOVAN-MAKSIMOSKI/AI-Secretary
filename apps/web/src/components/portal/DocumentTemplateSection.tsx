@@ -3,8 +3,20 @@ import { uploadDocumentTemplate } from "../../connection/supabase-client";
 import { useAppContextStore } from "../../store/app-context";
 import { useSessionStore } from "../../store/session";
 
-const TEMPLATE_TYPES = ["invoice", "offer"] as const;
+const TEMPLATE_TYPES = ["invoice", "offer", "transport_form", "identification_form"] as const;
 const TEMPLATE_EXTENSIONS = ["xlsx", "docx"] as const;
+// The two waste forms exist only as Excel templates — no Word variant — so the
+// extension is locked to xlsx whenever one of them is selected.
+const XLSX_ONLY_TEMPLATE_TYPES: ReadonlySet<(typeof TEMPLATE_TYPES)[number]> = new Set([
+  "transport_form",
+  "identification_form",
+]);
+const TEMPLATE_TYPE_LABELS: Record<(typeof TEMPLATE_TYPES)[number], string> = {
+  invoice: "invoice",
+  offer: "offer",
+  transport_form: "transport form",
+  identification_form: "identification form",
+};
 const FILE_ACCEPT_BY_EXTENSION: Record<(typeof TEMPLATE_EXTENSIONS)[number], string> = {
   xlsx: ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   docx: ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -91,12 +103,25 @@ export default function DocumentTemplateSection() {
               <span className="text-sm font-medium text-[var(--brand-ink)]">Template type</span>
               <select
                 value={docType}
-                onChange={(event) => setDocType(event.target.value as (typeof TEMPLATE_TYPES)[number])}
+                onChange={(event) => {
+                  const nextDocType = event.target.value as (typeof TEMPLATE_TYPES)[number];
+                  setDocType(nextDocType);
+                  setError("");
+
+                  // Waste forms are xlsx-only: force the extension and drop any
+                  // now-invalid (e.g. .docx) file the user had already chosen.
+                  if (XLSX_ONLY_TEMPLATE_TYPES.has(nextDocType) && extension !== "xlsx") {
+                    setExtension("xlsx");
+                    if (file && !fileMatchesExtension(file, "xlsx")) {
+                      setFile(null);
+                    }
+                  }
+                }}
                 className="h-11 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)]"
               >
                 {TEMPLATE_TYPES.map((option) => (
                   <option key={option} value={option}>
-                    {option}
+                    {TEMPLATE_TYPE_LABELS[option]}
                   </option>
                 ))}
               </select>
@@ -119,7 +144,11 @@ export default function DocumentTemplateSection() {
                 className="h-11 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)]"
               >
                 {TEMPLATE_EXTENSIONS.map((option) => (
-                  <option key={option} value={option}>
+                  <option
+                    key={option}
+                    value={option}
+                    disabled={option !== "xlsx" && XLSX_ONLY_TEMPLATE_TYPES.has(docType)}
+                  >
                     {option}
                   </option>
                 ))}
@@ -186,7 +215,7 @@ export default function DocumentTemplateSection() {
             <p>Fields sent as multipart form data:</p>
             <ul className="space-y-2 text-[var(--brand-text-muted)]">
               <li><span className="font-mono text-[var(--brand-ink)]">name</span> for the template display label.</li>
-              <li><span className="font-mono text-[var(--brand-ink)]">doc_type</span> set to invoice or offer.</li>
+              <li><span className="font-mono text-[var(--brand-ink)]">doc_type</span> set to invoice, offer, transport_form, or identification_form.</li>
               <li><span className="font-mono text-[var(--brand-ink)]">extension</span> set to xlsx or docx.</li>
               <li><span className="font-mono text-[var(--brand-ink)]">file</span> as the selected template bytes.</li>
             </ul>
