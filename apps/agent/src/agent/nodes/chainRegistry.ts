@@ -5,7 +5,7 @@ export type ChainId =
   | 'waste_law_query'
   | 'task_query'
   | 'calendar_query'
-  | 'client_lookup';
+  | 'firm_lookup';
 
 export interface ChainDefinition {
   id: ChainId;
@@ -20,7 +20,7 @@ export const CHAIN_REGISTRY: ChainDefinition[] = [
     id: 'invoice_extraction',
     displayName: 'Invoice Extraction',
     description: 'Extract invoice fields and generate invoice-ready structured data from user input.',
-    keywords: ['invoice', 'bill', 'faktura', 'naplata', 'price', 'tax', 'client'],
+    keywords: ['invoice', 'bill', 'faktura', 'naplata', 'price', 'tax', 'firm'],
   },
   {
     id: 'offer_extraction',
@@ -56,10 +56,10 @@ export const CHAIN_REGISTRY: ChainDefinition[] = [
     keywords: [],
   },
   {
-    id: 'client_lookup',
-    displayName: 'Client Lookup',
+    id: 'firm_lookup',
+    displayName: 'Firm Lookup',
     description:
-      "Looks up a stored client's saved contact details (email, phone, address, tax number, notes) by the client's name. Read-only.",
+      "Looks up a stored firm's saved contact details (email, phone, address, tax number, notes) by the firm's name. Read-only.",
     keywords: [],
   },
 ];

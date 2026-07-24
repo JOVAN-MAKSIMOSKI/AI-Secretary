@@ -35,7 +35,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from routers.business import router as business_router
-from routers.clients import router as clients_router
+from routers.firms import router as firms_router
+from routers.disposal_places import router as disposal_places_router
+from routers.contacts import router as contacts_router
 from routers.documents import router as documents_router
 from routers.rag import router as rag_router
 from routers.stt import router as stt_router
@@ -95,7 +97,9 @@ async def healthz():
 
 
 app.include_router(business_router)
-app.include_router(clients_router)
+app.include_router(firms_router)
+app.include_router(disposal_places_router)
+app.include_router(contacts_router)
 app.include_router(documents_router)
 app.include_router(rag_router)
 app.include_router(stt_router)

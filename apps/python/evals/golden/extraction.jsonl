@@ -7,8 +7,8 @@
 //   "@absent"        — the key must be missing (or null): the chain must not invent a value
 //   "contains:x"     — case-insensitive substring match; everything else is exact (numbers with tolerance)
 
-{"id": "ext-inv-mk-full", "chain": "invoice", "message": "Направи фактура за Тангента за 10 единици по 1500 денари, ДДВ 18%", "expect": {"invoice_type": "goods", "client_name": "contains:тангента", "units": 10, "price_per_unit": 1500, "tax_percentage": 18, "price_before_tax": 15000, "price_after_tax": 12300}}
-{"id": "ext-inv-en-full", "chain": "invoice", "message": "Create an invoice for client Petrov, 5 units at 2000 denars each, 18% tax", "expect": {"client_name": "contains:petrov", "units": 5, "price_per_unit": 2000, "tax_percentage": 18, "price_before_tax": 10000, "price_after_tax": 8200}}
+{"id": "ext-inv-mk-full", "chain": "invoice", "message": "Направи фактура за Тангента за 10 единици по 1500 денари, ДДВ 18%", "expect": {"invoice_type": "goods", "firm_name": "contains:тангента", "units": 10, "price_per_unit": 1500, "tax_percentage": 18, "price_before_tax": 15000, "price_after_tax": 12300}}
+{"id": "ext-inv-en-full", "chain": "invoice", "message": "Create an invoice for client Petrov, 5 units at 2000 denars each, 18% tax", "expect": {"firm_name": "contains:petrov", "units": 5, "price_per_unit": 2000, "tax_percentage": 18, "price_before_tax": 10000, "price_after_tax": 8200}}
 {"id": "ext-inv-mk-voice-words", "chain": "invoice", "message": "фактура за извршен транспорт пет парчиња по илјада денари", "expect": {"invoice_type": "transport", "units": 5, "price_per_unit": 1000, "tax_percentage": 5, "price_after_tax": 4750}, "note": "Voice surface: Whisper transcribes spoken amounts as number words; transport type must default to 5% tax."}
 {"id": "ext-inv-mk-no-amounts", "chain": "invoice", "message": "Направи фактура за Тангента за консултантски услуги", "expect": {"units": "@absent", "price_per_unit": "@absent", "price_after_tax": "@absent"}, "note": "Omission guard: no amounts in the message means no invented numbers on the invoice."}
 

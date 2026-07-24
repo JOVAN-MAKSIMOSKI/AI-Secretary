@@ -33,6 +33,7 @@ import { getGmailInboxStats, getDocumentBuffer } from './mcp/gmail.js';
 import JSZip from 'jszip';
 import { supabase } from './lib/supabase.js';
 import { writeAuditLog } from './repository/auditLogs.js';
+import { startStorageCleanupSchedule } from './jobs/storageCleanup.js';
 import { logger } from './lib/logger.js';
 
 type AuthenticatedRequest = Request & { userAuthId?: string };
@@ -945,4 +946,6 @@ app.get('/calls/audio/:audioId', (req: Request, res: Response) => {
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
 	logger.info(`Agent backend listening on port ${port}`);
+	// Daily sweep that deletes generated invoice/offer files past their retention window.
+	startStorageCleanupSchedule();
 });

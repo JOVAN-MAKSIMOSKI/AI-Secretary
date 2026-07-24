@@ -4,8 +4,9 @@ frontend/node_modules/
 frontend/dist/
 apps/**/dist/
 
-# Qdrant local vector DB data
+# Qdrant local vector DB data (including orphaned snapshots left by a reload/re-ingest)
 **/qdrant_data/
+**/qdrant_data.orphan-*/
 
 # Raw law corpus (large binaries) — regenerate the vector store via apps/python/scripts/ingest.py
 apps/agent/src/rag-agent/resources/*

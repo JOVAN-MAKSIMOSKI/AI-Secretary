@@ -26,6 +26,8 @@ export interface Business {
   phone: string | null;
   address: string | null;
   logo_url: string | null;
+  dangerous_waste_permit_number: string | null;
+  permit_number: string | null;
   plan: string;
   tenantprofilecontext: TenantWasteProfile | null;
   created_at: string | null;

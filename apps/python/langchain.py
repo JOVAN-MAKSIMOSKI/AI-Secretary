@@ -578,7 +578,7 @@ def run_invoice_extraction(
         "value_date\n"
         "consignment_note_number\n"
         "order_number\n"
-        "client_name\n"
+        "firm_name\n"
         "description\n"
         "units\n"
         "price_per_unit\n"

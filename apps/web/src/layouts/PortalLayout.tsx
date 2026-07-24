@@ -5,7 +5,7 @@ import { Brain, CalendarDays, CircleHelp, FileText, LayoutDashboard, Phone, Sett
 
 const navItems = [
   { label: "Dashboard", to: "/portal/dashboard", icon: LayoutDashboard },
-  { label: "Clients", to: "/portal/clients", icon: Users },
+  { label: "Parties", to: "/portal/parties", icon: Users },
   { label: "Documents", to: "/portal/documents", icon: FileText },
   { label: "Calendar", to: "/portal/calendar", icon: CalendarDays },
   { label: "Contact", to: "/portal/contact", icon: Phone },

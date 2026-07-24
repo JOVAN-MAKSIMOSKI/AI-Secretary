@@ -4,7 +4,7 @@ import type { ChainId } from './nodes/chainRegistry.js';
 
 export interface AgentState {
   tenantId: string;
-  clientId: string;
+  firmId: string;
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   currentAction: 'idle' | 'planning' | 'resolving' | 'executing' | 'auditing';
   // ChainId from the registry so new chains (e.g. waste_law_query) can't drift

@@ -17,8 +17,8 @@ import { getChainRegistry, type ChainId } from '../agent/nodes/chainRegistry.js'
 import { createCalendarEvent } from '../mcp/calendar.js';
 import { GmailReconnectRequiredError } from '../lib/gmailOAuth.js';
 import { calendarExtractionSchema } from '../agent/calendarTime.js';
-import { handleTaskQuery, handleCalendarQuery, handleClientLookup } from '../agent/chainHandlers.js';
-import { speakTaskQuery, speakCalendarQuery, speakClientLookup } from './voicePhrasing.js';
+import { handleTaskQuery, handleCalendarQuery, handleFirmLookup } from '../agent/chainHandlers.js';
+import { speakTaskQuery, speakCalendarQuery, speakFirmLookup } from './voicePhrasing.js';
 import { runWasteLawChain } from '../agent/wasteLawChain.js';
 import {
   getOrCreateCallState,
@@ -186,11 +186,11 @@ async function executeChain(
           : ((await callPythonExtraction('/documents/extract', transcript, tenantId)).extracted ?? {}) as Record<string, unknown>;
         const extractionMs = Date.now() - extractionStart;
 
-        const clientId = extracted.client_id as string | undefined;
-        const clientName = extracted.client_name as string | undefined;
-        const clientTaxNumber = (extracted.client_tax_number as string | undefined) ?? '';
+        const firmId = extracted.firm_id as string | undefined;
+        const firmName = extracted.firm_name as string | undefined;
+        const firmTaxNumber = (extracted.firm_tax_number as string | undefined) ?? '';
 
-        if (!clientId || !clientName) {
+        if (!firmId || !firmName) {
           return "Не можев да го идентификувам клиентот. Ве молам осигурете се дека името на клиентот е јасно.";
         }
 
@@ -214,14 +214,14 @@ async function executeChain(
         const orderNumber = safePositiveInt(extracted.order_number, nextNum);
 
         const invoicePayload = {
-          client_id: clientId,
+          firm_id: firmId,
           invoice_number: invoiceNumber,
           invoice_type: invoiceType,
           invoice_date: today,
           value_date: valueDate,
           order_number: orderNumber,
-          client_name: clientName,
-          client_tax_number: clientTaxNumber,
+          firm_name: firmName,
+          firm_tax_number: firmTaxNumber,
           description: (extracted.description as string | undefined) ?? 'Services',
           units: safePositiveInt(extracted.units, 1),
           price_per_unit: extracted.price_per_unit ?? 0,
@@ -287,9 +287,9 @@ async function executeChain(
       return speakCalendarQuery(result);
     }
 
-    case 'client_lookup': {
-      const result = await handleClientLookup(tenantId, transcript);
-      return speakClientLookup(result);
+    case 'firm_lookup': {
+      const result = await handleFirmLookup(tenantId, transcript);
+      return speakFirmLookup(result);
     }
 
     // Waste-law advisor over the phone. No user JWT on this path, so the chain

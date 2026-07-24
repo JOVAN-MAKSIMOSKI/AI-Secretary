@@ -294,13 +294,13 @@ export async function scheduleMeeting(
       return { success: false, error: `Tenant '${tenantId}' not found` };
     }
 
-    const client = await prisma.clients.findFirst({
+    const firm = await prisma.firms.findFirst({
       where: { id: clientId, tenant_id: business.owner_auth_id },
       select: { name: true, email: true },
     });
 
-    if (!client) {
-      return { success: false, error: `Client '${clientId}' not found for this tenant` };
+    if (!firm) {
+      return { success: false, error: `Firm '${clientId}' not found for this tenant` };
     }
 
     const { auth } = await buildGmailAuthClient(tenantId, userAuthId);
@@ -309,7 +309,7 @@ export async function scheduleMeeting(
 
     const event: calendar_v3.Schema$Event = {
       summary: title,
-      description: description || `Meeting with ${client.name}`,
+      description: description || `Meeting with ${firm.name}`,
       start: {
         dateTime: start.toISOString(),
         timeZone: DEFAULT_BUSINESS_TIMEZONE,
@@ -320,7 +320,7 @@ export async function scheduleMeeting(
       },
       attendees: [
         { email: business.email, organizer: true, responseStatus: 'accepted' },
-        { email: client.email },
+        { email: firm.email },
       ],
       conferenceData: {
         createRequest: {

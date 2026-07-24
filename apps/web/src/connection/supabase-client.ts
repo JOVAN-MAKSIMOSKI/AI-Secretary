@@ -52,7 +52,7 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): P
   }
 }
 
-export type ClientCreateRequest = {
+export type FirmCreateRequest = {
   name: string;
   email: string;
   city?: string | null;
@@ -60,9 +60,10 @@ export type ClientCreateRequest = {
   phone?: string | null;
   address?: string | null;
   notes?: string | null;
+  permit_number?: string | null;
 };
 
-export type ClientUpdateRequest = {
+export type FirmUpdateRequest = {
   name: string;
   email: string;
   city?: string | null;
@@ -70,9 +71,10 @@ export type ClientUpdateRequest = {
   phone?: string | null;
   address?: string | null;
   notes?: string | null;
+  permit_number?: string | null;
 };
 
-export type ClientResponse = {
+export type FirmResponse = {
   id: string;
   tenant_id: string;
   name: string;
@@ -82,19 +84,62 @@ export type ClientResponse = {
   phone: string | null;
   address: string | null;
   notes: string | null;
+  permit_number: string | null;
+  created_at: string | null;
+};
+
+// Disposal places — all five fields required (NOT NULL columns on disposal_places).
+export type DisposalPlaceCreateRequest = {
+  name: string;
+  address: string;
+  place: string;
+  email: string;
+  phone_number: string;
+};
+
+export type DisposalPlaceUpdateRequest = DisposalPlaceCreateRequest;
+
+export type DisposalPlaceResponse = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  address: string;
+  place: string;
+  email: string;
+  phone_number: string;
+  created_at: string | null;
+};
+
+// Contacts — standalone individuals (address book). All four fields required.
+export type ContactCreateRequest = {
+  name: string;
+  email: string;
+  phone_number: string;
+  address: string;
+};
+
+export type ContactUpdateRequest = ContactCreateRequest;
+
+export type ContactResponse = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  email: string;
+  phone_number: string;
+  address: string;
   created_at: string | null;
 };
 
 export type InvoiceDocumentRequest = {
-  client_id: string;
+  firm_id: string;
   invoice_number: string;
   invoice_type: "goods" | "transport";
   invoice_date: string;
   value_date: string;
   consignment_note_number?: number | null;
   order_number?: number | null;
-  client_name: string;
-  client_tax_number: string;
+  firm_name: string;
+  firm_tax_number: string;
   description: string;
   units: number;
   price_per_unit: number;
@@ -162,6 +207,8 @@ export type BusinessProfileResponse = {
   phone: string | null;
   address: string | null;
   logo_url: string | null;
+  dangerous_waste_permit_number: string | null;
+  permit_number: string | null;
   plan: string;
   tenantprofilecontext: TenantWasteProfile | null;
   created_at: string | null;
@@ -205,18 +252,18 @@ export type TaskResponse = {
   updated_at: string;
 };
 
-const CLIENTS_CACHE_TTL_MS = 60_000;
+const FIRMS_CACHE_TTL_MS = 60_000;
 const TASKS_CACHE_TTL_MS = 60_000;
 const CALENDAR_EVENTS_CACHE_TTL_MS = 300_000;
 const CALENDAR_EVENTS_CACHE_KEY = "ai-secretary:calendar-events:v1";
 const TASKS_CACHE_KEY = "ai-secretary:tasks:v1";
 
-type ClientsCache = {
-  data: ClientResponse[];
+type FirmsCache = {
+  data: FirmResponse[];
   fetchedAt: number;
 };
 
-let clientsCache: ClientsCache | null = null;
+let firmsCache: FirmsCache | null = null;
 
 type TasksCache = {
   data: TaskResponse[];
@@ -310,8 +357,8 @@ export function clearCachedTasks(): void {
   }
 }
 
-export function clearClientsCache(): void {
-  clientsCache = null;
+export function clearFirmsCache(): void {
+  firmsCache = null;
 }
 
 export function clearTasksCache(): void {
@@ -583,19 +630,19 @@ export async function deleteTask(taskId: string): Promise<void> {
   tasksCache = null;
 }
 
-export async function createClientProfile(payload: ClientCreateRequest): Promise<ClientResponse> {
+export async function createFirmProfile(payload: FirmCreateRequest): Promise<FirmResponse> {
   const headers = await getAuthHeaders({
     "Content-Type": "application/json",
   });
 
-  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients`, {
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/firms`, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    let detail = "Failed to create client.";
+    let detail = "Failed to create firm.";
     try {
       const data = (await response.json()) as { detail?: string };
       if (data?.detail) {
@@ -607,28 +654,28 @@ export async function createClientProfile(payload: ClientCreateRequest): Promise
     throw new Error(detail);
   }
 
-  const created = (await response.json()) as ClientResponse;
-  clearClientsCache();
+  const created = (await response.json()) as FirmResponse;
+  clearFirmsCache();
   return created;
 }
 
-export async function getClientsByTenant(options?: { forceRefresh?: boolean }): Promise<ClientResponse[]> {
+export async function getFirmsByTenant(options?: { forceRefresh?: boolean }): Promise<FirmResponse[]> {
   const now = Date.now();
   if (
     !options?.forceRefresh &&
-    clientsCache !== null &&
-    now - clientsCache.fetchedAt < CLIENTS_CACHE_TTL_MS
+    firmsCache !== null &&
+    now - firmsCache.fetchedAt < FIRMS_CACHE_TTL_MS
   ) {
-    return clientsCache.data;
+    return firmsCache.data;
   }
 
   const headers = await getAuthHeaders();
-  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients`, {
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/firms`, {
     headers,
   });
 
   if (!response.ok) {
-    let detail = "Failed to fetch clients.";
+    let detail = "Failed to fetch firms.";
     try {
       const data = (await response.json()) as { detail?: string };
       if (data?.detail) {
@@ -640,20 +687,20 @@ export async function getClientsByTenant(options?: { forceRefresh?: boolean }): 
     throw new Error(detail);
   }
 
-  const results = (await response.json()) as ClientResponse[];
-  clientsCache = { data: results, fetchedAt: Date.now() };
+  const results = (await response.json()) as FirmResponse[];
+  firmsCache = { data: results, fetchedAt: Date.now() };
   return results;
 }
 
-export async function deleteClientById(clientId: string): Promise<void> {
+export async function deleteFirmById(clientId: string): Promise<void> {
   const headers = await getAuthHeaders();
-  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients/${clientId}`, {
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/firms/${clientId}`, {
     method: "DELETE",
     headers,
   });
 
   if (!response.ok) {
-    let detail = "Failed to delete client.";
+    let detail = "Failed to delete firm.";
     try {
       const data = (await response.json()) as { detail?: string };
       if (data?.detail) {
@@ -665,25 +712,25 @@ export async function deleteClientById(clientId: string): Promise<void> {
     throw new Error(detail);
   }
 
-  clearClientsCache();
+  clearFirmsCache();
 }
 
-export async function updateClientById(
+export async function updateFirmById(
   clientId: string,
-  payload: ClientUpdateRequest
-): Promise<ClientResponse> {
+  payload: FirmUpdateRequest
+): Promise<FirmResponse> {
   const headers = await getAuthHeaders({
     "Content-Type": "application/json",
   });
 
-  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/clients/${clientId}`, {
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/firms/${clientId}`, {
     method: "PUT",
     headers,
     body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    let detail = "Failed to update client.";
+    let detail = "Failed to update firm.";
     try {
       const data = (await response.json()) as { detail?: string };
       if (data?.detail) {
@@ -695,9 +742,153 @@ export async function updateClientById(
     throw new Error(detail);
   }
 
-  const updated = (await response.json()) as ClientResponse;
-  clearClientsCache();
+  const updated = (await response.json()) as FirmResponse;
+  clearFirmsCache();
   return updated;
+}
+
+export async function createDisposalPlace(
+  payload: DisposalPlaceCreateRequest
+): Promise<DisposalPlaceResponse> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/disposal-places`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to create disposal place."));
+  }
+
+  return (await response.json()) as DisposalPlaceResponse;
+}
+
+export async function getDisposalPlacesByTenant(): Promise<DisposalPlaceResponse[]> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/disposal-places`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to fetch disposal places."));
+  }
+
+  return (await response.json()) as DisposalPlaceResponse[];
+}
+
+export async function updateDisposalPlaceById(
+  disposalPlaceId: string,
+  payload: DisposalPlaceUpdateRequest
+): Promise<DisposalPlaceResponse> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(
+    `${pythonApiBaseUrl}/disposal-places/${encodeURIComponent(disposalPlaceId)}`,
+    {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to update disposal place."));
+  }
+
+  return (await response.json()) as DisposalPlaceResponse;
+}
+
+export async function deleteDisposalPlaceById(disposalPlaceId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(
+    `${pythonApiBaseUrl}/disposal-places/${encodeURIComponent(disposalPlaceId)}`,
+    {
+      method: "DELETE",
+      headers,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to delete disposal place."));
+  }
+}
+
+export async function createContact(
+  payload: ContactCreateRequest
+): Promise<ContactResponse> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/contacts`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to create contact."));
+  }
+
+  return (await response.json()) as ContactResponse;
+}
+
+export async function getContactsByTenant(): Promise<ContactResponse[]> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/contacts`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to fetch contacts."));
+  }
+
+  return (await response.json()) as ContactResponse[];
+}
+
+export async function updateContactById(
+  contactId: string,
+  payload: ContactUpdateRequest
+): Promise<ContactResponse> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(
+    `${pythonApiBaseUrl}/contacts/${encodeURIComponent(contactId)}`,
+    {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to update contact."));
+  }
+
+  return (await response.json()) as ContactResponse;
+}
+
+export async function deleteContactById(contactId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(
+    `${pythonApiBaseUrl}/contacts/${encodeURIComponent(contactId)}`,
+    {
+      method: "DELETE",
+      headers,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await extractErrorDetail(response, "Failed to delete contact."));
+  }
 }
 
 export async function registerBusinessAccount(
@@ -729,7 +920,7 @@ export async function registerBusinessAccount(
 
 export async function uploadDocumentTemplate(payload: {
   name: string;
-  docType: "invoice" | "offer";
+  docType: "invoice" | "offer" | "transport_form" | "identification_form";
   extension: "xlsx" | "docx";
   file: File;
 }): Promise<DocumentTemplateResponse> {
@@ -906,6 +1097,8 @@ export async function updateBusinessProfile(
     phone: string | null;
     address: string | null;
     logo_url: string | null;
+    dangerous_waste_permit_number: string | null;
+    permit_number: string | null;
     tenantprofilecontext: TenantWasteProfile;
   }>
 ): Promise<BusinessProfileResponse> {
@@ -973,9 +1166,9 @@ export type ExtractedInvoiceFromMessage = {
   invoice_year?: number;
   consignment_note_number?: number;
   order_number?: number;
-  client_id?: string;
-  client_name?: string;
-  client_tax_number?: string;
+  firm_id?: string;
+  firm_name?: string;
+  firm_tax_number?: string;
   description?: string;
   units?: number;
   price_per_unit?: number;

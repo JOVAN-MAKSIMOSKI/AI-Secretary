@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   createInvoiceDocument,
-  getClientsByTenant,
+  getFirmsByTenant,
 } from "../../connection/supabase-client";
 import { useSessionStore } from "../../store/session";
 
@@ -77,7 +77,7 @@ export default function Documents() {
     const loadClients = async () => {
       setLoadingClients(true);
       try {
-        const data = await getClientsByTenant({ forceRefresh: true });
+        const data = await getFirmsByTenant({ forceRefresh: true });
         if (isMounted) {
           setClients(
             data.map((client) => ({
@@ -127,12 +127,12 @@ export default function Documents() {
     }
 
     if (!selectedClient) {
-      setInvoiceError("Please select a client first.");
+      setInvoiceError("Please select a firm first.");
       return;
     }
 
     if (!invoiceClientTaxNumber.trim()) {
-      setInvoiceError("Selected client is missing a tax number. Update the client profile first.");
+      setInvoiceError("Selected firm is missing a tax number. Update the firm profile first.");
       return;
     }
 
@@ -187,15 +187,15 @@ export default function Documents() {
     setInvoiceLoading(true);
     try {
       const result = await createInvoiceDocument({
-        client_id: selectedClient.id,
+        firm_id: selectedClient.id,
         invoice_number: invoiceNumber.trim(),
         invoice_type: invoiceType,
         invoice_date: invoiceDate,
         value_date: valueDate,
         consignment_note_number: parsedConsignment,
         order_number: parsedOrder,
-        client_name: invoiceClientName.trim(),
-        client_tax_number: invoiceClientTaxNumber.trim(),
+        firm_name: invoiceClientName.trim(),
+        firm_tax_number: invoiceClientTaxNumber.trim(),
         description: description.trim(),
         units: parsedUnits,
         price_per_unit: parsedPricePerUnit,
@@ -228,14 +228,14 @@ export default function Documents() {
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <label className="grid gap-2">
-              <span className="text-sm font-medium text-[var(--brand-ink)]">Client</span>
+              <span className="text-sm font-medium text-[var(--brand-ink)]">Firm</span>
               <select
                 value={invoiceClientId}
                 onChange={(event) => setInvoiceClientId(event.target.value)}
                 className="h-11 rounded-lg border border-[var(--brand-border)] bg-[var(--brand-card)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)]"
                 required
               >
-                <option value="">{loadingClients ? "Loading clients..." : "Select client"}</option>
+                <option value="">{loadingClients ? "Loading firms..." : "Select firm"}</option>
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
                     {client.name}
@@ -330,7 +330,7 @@ export default function Documents() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm font-medium text-[var(--brand-ink)]">Client name</span>
+              <span className="text-sm font-medium text-[var(--brand-ink)]">Firm name</span>
               <input
                 type="text"
                 value={invoiceClientName}
@@ -342,7 +342,7 @@ export default function Documents() {
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm font-medium text-[var(--brand-ink)]">Client tax number</span>
+              <span className="text-sm font-medium text-[var(--brand-ink)]">Firm tax number</span>
               <input
                 type="text"
                 value={invoiceClientTaxNumber}

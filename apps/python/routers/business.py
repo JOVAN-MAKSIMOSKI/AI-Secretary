@@ -25,7 +25,7 @@ def _get_business_by_owner_auth_id(owner_auth_id: str):
         # NOTE: no `plan` here — the live businesses table has no such column
         # (schema drift vs prisma/schema.prisma); selecting it 42703s the query.
         # Responses default plan to "free" via .get().
-        .select("id, owner_auth_id, name, email, tax_number, transaction_account, depositor, phone, address, logo_url, tenantprofilecontext, created_at")
+        .select("id, owner_auth_id, name, email, tax_number, transaction_account, depositor, phone, address, logo_url, dangerous_waste_permit_number, permit_number, tenantprofilecontext, created_at")
         .eq("owner_auth_id", owner_auth_id)
         .limit(1)
         .execute()
@@ -131,6 +131,8 @@ def get_business_profile(current_user_id: str = Depends(get_current_user_id)) ->
         phone=business.get("phone"),
         address=business.get("address"),
         logo_url=business.get("logo_url"),
+        dangerous_waste_permit_number=business.get("dangerous_waste_permit_number"),
+        permit_number=business.get("permit_number"),
         plan=business.get("plan", "free"),
         tenantprofilecontext=business.get("tenantprofilecontext"),
         created_at=business.get("created_at"),
@@ -192,6 +194,8 @@ def update_business_profile(
         phone=updated.get("phone"),
         address=updated.get("address"),
         logo_url=updated.get("logo_url"),
+        dangerous_waste_permit_number=updated.get("dangerous_waste_permit_number"),
+        permit_number=updated.get("permit_number"),
         plan=updated.get("plan", "free"),
         tenantprofilecontext=updated.get("tenantprofilecontext"),
         created_at=updated.get("created_at"),

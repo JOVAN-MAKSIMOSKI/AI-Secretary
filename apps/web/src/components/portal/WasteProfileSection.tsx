@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   getUserBusiness,
   updateBusinessProfile,
+  type BusinessProfileResponse,
   type TenantWasteProfile,
 } from "../../connection/supabase-client";
 
@@ -44,6 +45,10 @@ const wasteProfileFormSchema = z.object({
   location: z.string().max(120),
   has_permits: z.boolean(),
   permit_types: z.string().max(500),
+  // Real businesses columns (not part of tenantprofilecontext JSONB) — stored as
+  // text to preserve leading zeros / separators in official permit numbers.
+  dangerous_waste_permit_number: z.string().max(60),
+  permit_number: z.string().max(60),
 });
 
 type WasteProfileFormValues = z.infer<typeof wasteProfileFormSchema>;
@@ -55,17 +60,23 @@ const EMPTY_FORM: WasteProfileFormValues = {
   location: "",
   has_permits: false,
   permit_types: "",
+  dangerous_waste_permit_number: "",
+  permit_number: "",
 };
 
-function profileToFormValues(profile: TenantWasteProfile | null): WasteProfileFormValues {
-  if (!profile) return EMPTY_FORM;
+// The permit numbers are top-level businesses columns, so they come from the
+// business response, not the tenantprofilecontext blob.
+function businessToFormValues(business: BusinessProfileResponse | null): WasteProfileFormValues {
+  const profile = business?.tenantprofilecontext ?? null;
   return {
-    entity_type: profile.entity_type ?? "",
-    waste_types: profile.waste_types ?? [],
-    annual_volume: profile.annual_volume ?? "",
-    location: profile.location ?? "",
-    has_permits: profile.has_permits ?? false,
-    permit_types: (profile.permit_types ?? []).join(", "),
+    entity_type: profile?.entity_type ?? "",
+    waste_types: profile?.waste_types ?? [],
+    annual_volume: profile?.annual_volume ?? "",
+    location: profile?.location ?? "",
+    has_permits: profile?.has_permits ?? false,
+    permit_types: (profile?.permit_types ?? []).join(", "),
+    dangerous_waste_permit_number: business?.dangerous_waste_permit_number ?? "",
+    permit_number: business?.permit_number ?? "",
   };
 }
 
@@ -107,7 +118,7 @@ export default function WasteProfileSection() {
     setIsLoading(true);
     try {
       const business = await getUserBusiness();
-      reset(profileToFormValues(business?.tenantprofilecontext ?? null));
+      reset(businessToFormValues(business));
     } catch (error) {
       setBanner({
         tone: "error",
@@ -128,8 +139,10 @@ export default function WasteProfileSection() {
     try {
       const updated = await updateBusinessProfile({
         tenantprofilecontext: formValuesToProfile(values),
+        dangerous_waste_permit_number: values.dangerous_waste_permit_number.trim() || null,
+        permit_number: values.permit_number.trim() || null,
       });
-      reset(profileToFormValues(updated.tenantprofilecontext));
+      reset(businessToFormValues(updated));
       setBanner({ tone: "success", message: "Waste profile saved." });
     } catch (error) {
       setBanner({
@@ -192,6 +205,32 @@ export default function WasteProfileSection() {
                 maxLength={120}
                 placeholder="e.g. Skopje"
                 {...register("location")}
+                className={selectClasses}
+              />
+            </div>
+
+            <div>
+              <label className={labelClasses} htmlFor="permit_number">Permit number</label>
+              <input
+                id="permit_number"
+                type="text"
+                maxLength={60}
+                placeholder="e.g. 00123 or MK-2024/551"
+                {...register("permit_number")}
+                className={selectClasses}
+              />
+            </div>
+
+            <div>
+              <label className={labelClasses} htmlFor="dangerous_waste_permit_number">
+                Dangerous waste permit number
+              </label>
+              <input
+                id="dangerous_waste_permit_number"
+                type="text"
+                maxLength={60}
+                placeholder="e.g. 00456 or MK-2024/778"
+                {...register("dangerous_waste_permit_number")}
                 className={selectClasses}
               />
             </div>

@@ -34,7 +34,7 @@
 
 // Read-only query chains (voice-parity plan). These READ existing data; the boundary
 // cases guard the split from their write-side siblings (task_query vs a task the UI
-// creates, calendar_query vs calendar_event_extraction, client_lookup vs the client name
+// creates, calendar_query vs calendar_event_extraction, firm_lookup vs the firm name
 // that also appears in invoice/offer requests).
 {"id": "task-mk-remaining", "message": "Кои задачи ми преостануваат?", "expect": "task_query", "minConfidence": 0.6, "source": "human"}
 {"id": "task-en-left", "message": "What tasks do I have left to do?", "expect": "task_query", "minConfidence": 0.6, "source": "human"}
@@ -48,8 +48,8 @@
 {"id": "cal-q-en-nokeyword", "message": "Who am I seeing today?", "expect": "calendar_query", "minConfidence": 0.5, "source": "human", "note": "No-keyword: asks about the day's appointments without the word meeting/calendar."}
 {"id": "cal-q-mk-spoken", "message": "може ли да ми кажеш кои состаноци ги имам за оваа недела", "expect": "calendar_query", "minConfidence": 0.5, "source": "human", "note": "Spoken polite framing, relative week window."}
 
-{"id": "client-mk-details", "message": "Кои се податоците за клиентот Марко Петров?", "expect": "client_lookup", "minConfidence": 0.6, "source": "human"}
-{"id": "client-en-contact", "message": "What's the email and phone number for client Nikola?", "expect": "client_lookup", "minConfidence": 0.6, "source": "human"}
-{"id": "client-mk-address-boundary", "message": "Кажи ми ја адресата на клиентот Тангента", "expect": "client_lookup", "minConfidence": 0.5, "source": "human", "note": "Boundary vs invoice/offer: a client name appears there too, but this only asks to read a stored detail, not to bill or quote."}
-{"id": "client-en-nokeyword", "message": "What number do I have saved for Ana Stoeva?", "expect": "client_lookup", "minConfidence": 0.5, "source": "human", "note": "No-keyword: retrieves saved contact info without the word client."}
-{"id": "client-mk-spoken", "message": "слушај кажи ми го телефонскиот број на клиентот Ана", "expect": "client_lookup", "minConfidence": 0.5, "source": "human", "note": "Spoken STT style: filler opener, no punctuation."}
+{"id": "firm-mk-details", "message": "Кои се податоците за клиентот Марко Петров?", "expect": "firm_lookup", "minConfidence": 0.6, "source": "human"}
+{"id": "firm-en-contact", "message": "What's the email and phone number for client Nikola?", "expect": "firm_lookup", "minConfidence": 0.6, "source": "human"}
+{"id": "firm-mk-address-boundary", "message": "Кажи ми ја адресата на клиентот Тангента", "expect": "firm_lookup", "minConfidence": 0.5, "source": "human", "note": "Boundary vs invoice/offer: a firm name appears there too, but this only asks to read a stored detail, not to bill or quote."}
+{"id": "firm-en-nokeyword", "message": "What number do I have saved for Ana Stoeva?", "expect": "firm_lookup", "minConfidence": 0.5, "source": "human", "note": "No-keyword: retrieves saved contact info without the word client."}
+{"id": "firm-mk-spoken", "message": "слушај кажи ми го телефонскиот број на клиентот Ана", "expect": "firm_lookup", "minConfidence": 0.5, "source": "human", "note": "Spoken STT style: filler opener, no punctuation."}

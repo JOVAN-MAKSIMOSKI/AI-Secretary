@@ -14,7 +14,7 @@ interface EventLike {
   startTime: string;
 }
 
-interface ClientLike {
+interface FirmLike {
   name: string;
   email?: string | null;
   phone?: string | null;
@@ -84,21 +84,21 @@ export function speakCalendarQuery(result: ChainHandlerResult): string {
   return `${lead}${items}.`;
 }
 
-export function speakClientLookup(result: ChainHandlerResult): string {
+export function speakFirmLookup(result: ChainHandlerResult): string {
   if (!result.success || result.message === 'not_found') {
     return 'Не најдов клиент со тоа име. Ве молам повторете го името на клиентот.';
   }
 
-  const client = result.data.client as ClientLike | undefined;
-  if (!client) {
+  const firm = result.data.firm as FirmLike | undefined;
+  if (!firm) {
     return 'Не најдов клиент со тоа име. Ве молам повторете го името на клиентот.';
   }
 
-  const parts: string[] = [`Клиент ${client.name}.`];
-  if (client.email) parts.push(`Е-пошта: ${client.email}.`);
-  if (client.phone) parts.push(`Телефон: ${client.phone}.`);
-  if (client.city) parts.push(`Град: ${client.city}.`);
-  if (client.tax_number) parts.push(`Даночен број: ${client.tax_number}.`);
+  const parts: string[] = [`Клиент ${firm.name}.`];
+  if (firm.email) parts.push(`Е-пошта: ${firm.email}.`);
+  if (firm.phone) parts.push(`Телефон: ${firm.phone}.`);
+  if (firm.city) parts.push(`Град: ${firm.city}.`);
+  if (firm.tax_number) parts.push(`Даночен број: ${firm.tax_number}.`);
 
   return parts.join(' ');
 }

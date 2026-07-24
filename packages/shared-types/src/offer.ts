@@ -3,7 +3,7 @@
 export interface Offer {
   id: string;
   tenant_id: string;
-  client_id: string;
+  firm_id: string;
   title: string;
   status: string;
   file_url: string | null;
