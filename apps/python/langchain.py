@@ -7,11 +7,33 @@ import json
 import os
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Iterable
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
+
+
+# Waste reference data (EWC code maps + the closed MK lists) is generated from
+# apps/agent/src/agent/wasteChapters.ts into resources/waste_reference.json — see
+# apps/agent/scripts/generateWasteReference.ts. It is the single source of truth for
+# both the extraction prompt (which offers the model exact values to snap onto) and the
+# Pydantic request model (which rejects anything outside them). Loaded once at import.
+_WASTE_REFERENCE_PATH = Path(__file__).resolve().parent / "resources" / "waste_reference.json"
+
+
+def _load_waste_reference() -> dict[str, Any]:
+    with _WASTE_REFERENCE_PATH.open(encoding="utf-8") as reference_file:
+        return json.load(reference_file)
+
+
+_WASTE_REFERENCE = _load_waste_reference()
+_EWC_HAZARDOUS_CODE_MAP: dict[str, str] = _WASTE_REFERENCE["ewc_hazardous_code_map"]
+_EWC_NON_HAZARDOUS_CODE_MAP: dict[str, str] = _WASTE_REFERENCE["ewc_non_hazardous_code_map"]
+_PACKING_METHODS: list[str] = list(_WASTE_REFERENCE["packing_methods"])
+_WASTE_ORIGINS: list[str] = list(_WASTE_REFERENCE["waste_origins"])
+_WASTE_OPERATIONS_CODES: list[str] = list(_WASTE_REFERENCE["waste_operations_codes"])
 
 
 _INTEGER_EXTRACTION_KEYS = {
@@ -29,6 +51,12 @@ _DECIMAL_EXTRACTION_KEYS = {
     "price_before_tax",
     "price_after_tax",
     "amount",
+    # Waste-form weights (kg): coerce like the other decimals so number words and
+    # string inputs normalize to floats instead of passing through as raw text.
+    "waste_owner_total_kg",
+    "collector_total_kg",
+    "end_owner_total_kg",
+    "total_weight_kg",
 }
 
 _EMPTY_LIKE_STRINGS = {
@@ -721,3 +749,228 @@ def run_offer_extraction(message: str) -> dict[str, Any]:
         return _normalize_extraction_output(result, allowed_keys=allowed_keys)
 
     return _normalize_extraction_output(str(result), allowed_keys=allowed_keys)
+
+
+def _numbered_options(values: Iterable[str]) -> str:
+    """Render a closed list as a numbered block for the extraction prompt."""
+    return "\n".join(f"{index}. {value}" for index, value in enumerate(values, start=1))
+
+
+def _resolve_ewc_code_from_waste_type(extracted: dict[str, Any]) -> dict[str, Any]:
+    """Resolve ewc_code + is_hazardous deterministically from waste_type.
+
+    Shared by both waste-form chains (identification and transport) — it reads only
+    waste_type and writes only the two derived code fields, so nothing in it is specific
+    to either form.
+
+    The LLM only picks a waste_type description off the injected closed lists; the code
+    and hazard class are then looked up in Python, not trusted from the model. This
+    guarantees the invariant both request schemas enforce — an asterisked (hazardous)
+    code is never paired with is_hazardous=false, and vice versa — because both fields
+    come from the same map entry. When waste_type matches no known description the code
+    fields are left absent, so validation fails loudly downstream rather than the form
+    silently carrying a wrong code.
+    """
+    normalized = dict(extracted)
+
+    waste_type = normalized.get("waste_type")
+    if isinstance(waste_type, str):
+        description = " ".join(waste_type.split())
+
+        hazardous_by_desc = {value: code for code, value in _EWC_HAZARDOUS_CODE_MAP.items()}
+        non_hazardous_by_desc = {value: code for code, value in _EWC_NON_HAZARDOUS_CODE_MAP.items()}
+
+        if description in hazardous_by_desc:
+            normalized["waste_type"] = description
+            normalized["ewc_code"] = hazardous_by_desc[description]
+            normalized["is_hazardous"] = True
+        elif description in non_hazardous_by_desc:
+            normalized["waste_type"] = description
+            normalized["ewc_code"] = non_hazardous_by_desc[description]
+            normalized["is_hazardous"] = False
+        else:
+            # No map match: drop any model-guessed code/hazard so the incomplete payload
+            # surfaces as missing fields instead of a fabricated code.
+            normalized.pop("ewc_code", None)
+            normalized.pop("is_hazardous", None)
+
+    return normalized
+
+
+def run_transport_form_extraction(message: str) -> dict[str, Any]:
+    """Extract waste transport-form (transport manifest) fields from free text.
+
+    Boundary vs. the earlier scaffold: waste_type is now snapped onto an exact value from
+    waste_reference.json inside the prompt, and ewc_code + is_hazardous are resolved
+    deterministically in Python afterwards instead of being asked of the model. Only
+    firm_name / disposal_place_name -> UUID resolution is still left to the per-form setup
+    layer, mirroring how invoice extraction yields firm_name and defers firm_id downstream.
+
+    Three weights and two dates, matching the template's boxes: waste_owner_total_kg is
+    section 3's declared quantity, collector_total_kg + collector_date are the section 4/5
+    handover pair (one event recorded by both sides, so one date), and end_owner_* is
+    section 6's receipt at the disposal place.
+    """
+    if _contains_prompt_injection(message):
+        raise ValueError(
+            "Transport-form extraction request rejected due to suspected prompt-injection content. "
+            "Provide only transport-form details without meta-instructions."
+        )
+
+    # ewc_code / is_hazardous are intentionally NOT accepted from the model — they are
+    # derived from waste_type in _resolve_ewc_code_from_waste_type.
+    allowed_keys = {
+        "firm_name",
+        "disposal_place_name",
+        "waste_type",
+        "waste_owner_total_kg",
+        "collector_total_kg",
+        "collector_date",
+        "end_owner_total_kg",
+        "end_owner_date",
+        "note",
+    }
+
+    prompt_template = (
+        "You are an extraction assistant for a waste transport manifest (transport form). "
+        "Extract only user-provided fields from the user message and return JSON only.\n\n"
+        "Expected keys:\n"
+        "firm_name (the waste owner / firm handing over the waste)\n"
+        "disposal_place_name (the end owner / disposal facility receiving the waste — a "
+        "landfill, депонија, or other named facility)\n"
+        "waste_type (the kind of waste — see closed list below)\n"
+        "waste_owner_total_kg (total quantity of waste declared by the waste owner)\n"
+        "collector_total_kg (weight handed over to and received by the collector)\n"
+        "collector_date (YYYY-MM-DD, the date of that handover)\n"
+        "end_owner_total_kg (weight received at the end owner / disposal facility)\n"
+        "end_owner_date (YYYY-MM-DD, the date of that receipt)\n"
+        "note (optional free-text remark)\n\n"
+        "Closed list — for waste_type you MUST copy one option EXACTLY as written "
+        "(same words, same Macedonian spelling). If none clearly fits, omit the key.\n\n"
+        "waste_type options:\n{waste_type_options}\n\n"
+        "Rules:\n"
+        "- Do not output keys outside the expected list.\n"
+        "- If a key is missing or uncertain, omit it.\n"
+        "- Do not include markdown fences or extra text.\n"
+        "- For waste_type, output the option string verbatim — never a paraphrase, "
+        "translation, or the list number.\n"
+        # This rule is load-bearing, not decorative. ewc_code is derived from waste_type
+        # downstream, and the derivation can only blank an unmatched waste_type when the
+        # model OMITS it — a paraphrase onto a real list entry looks like a clean match and
+        # ships a fabricated EWC code on a legal document. Loosening the wording here
+        # measurably reintroduced that (glass waste -> 'Отпад од пластика' -> 02 01 04).
+        "- If the waste described is NOT on the list, omit waste_type entirely. Never "
+        "substitute the nearest, most similar, or most likely option — a missing waste "
+        "type is corrected later, a wrong one becomes a false legal record.\n"
+        # The chain used to find the destination only from the Macedonian 'на/до депонија X'
+        # shape and returned nothing for English phrasings like 'at the X landfill', which
+        # cost the whole receiving party. Both surfaces are now spelled out explicitly.
+        # Scoped to disposal_place_name only: broader 'interpret generously' phrasing here
+        # bled into waste_type and caused exactly the fabrication the rule above forbids.
+        "- disposal_place_name is the RECEIVING party, and is written in either language: "
+        "'на депонија X', 'примени во X', 'at the X landfill', 'received at X'. Output only "
+        "the facility's own name, dropping the generic word around it — from 'at the Drisla "
+        "landfill' output 'Drisla'. This applies to disposal_place_name alone; it relaxes "
+        "nothing about waste_type.\n"
+        "- All weights must be numeric JSON values in kilograms, never words.\n"
+        "- Convert number words in any language to digits, including Macedonian: "
+        "'пет' is 5, 'сто' is 100, 'илјада' is 1000.\n"
+        "- All dates must be in YYYY-MM-DD format.\n\n"
+        "User message:\n{message}"
+    )
+
+    chain = create_simple_chain(prompt_template)
+    result = chain.invoke(
+        {
+            "message": message,
+            "waste_type_options": _numbered_options(
+                list(_EWC_HAZARDOUS_CODE_MAP.values()) + list(_EWC_NON_HAZARDOUS_CODE_MAP.values())
+            ),
+        }
+    )
+
+    raw = result if isinstance(result, str) else str(result)
+    extracted = _normalize_extraction_output(raw, allowed_keys=allowed_keys)
+    return _resolve_ewc_code_from_waste_type(extracted)
+
+
+def run_identification_form_extraction(message: str) -> dict[str, Any]:
+    """Extract waste identification-form fields from free text.
+
+    Boundary vs. the earlier scaffold: the three closed-list fields (packing_method,
+    waste_origin, waste_operation_code) and waste_type are now snapped onto exact
+    Macedonian values from waste_reference.json inside the prompt, and ewc_code +
+    is_hazardous are resolved deterministically in Python afterwards. Only firm_name /
+    contact_name -> UUID resolution is still left to the per-form setup layer, mirroring
+    how invoice extraction yields firm_name and defers firm_id downstream.
+    """
+    if _contains_prompt_injection(message):
+        raise ValueError(
+            "Identification-form extraction request rejected due to suspected prompt-injection content. "
+            "Provide only identification-form details without meta-instructions."
+        )
+
+    # ewc_code / is_hazardous are intentionally NOT accepted from the model — they are
+    # derived from waste_type in _resolve_ewc_code_from_waste_type.
+    allowed_keys = {
+        "firm_name",
+        "contact_name",
+        "waste_location",
+        "waste_type",
+        "packing_method",
+        "total_weight_kg",
+        "waste_origin",
+        "waste_operation_code",
+        "place",
+        "date",
+    }
+
+    prompt_template = (
+        "You are an extraction assistant for a waste identification form. "
+        "Extract only user-provided fields from the user message and return JSON only.\n\n"
+        "Expected keys:\n"
+        "firm_name (the waste owner / firm)\n"
+        "contact_name (the responsible person)\n"
+        "waste_location (where the waste is physically located)\n"
+        "waste_type (the kind of waste — see closed list below)\n"
+        "packing_method (how the waste is packaged — see closed list below)\n"
+        "total_weight_kg (total weight in kilograms)\n"
+        "waste_origin (where within the business the waste originates — see closed list below)\n"
+        "waste_operation_code (planned recovery/disposal operation — see closed list below)\n"
+        "place (place where the form is signed)\n"
+        "date (YYYY-MM-DD)\n\n"
+        "Closed lists — for these four fields you MUST copy one option EXACTLY as written "
+        "(same words, same Macedonian spelling). If none clearly fits, omit the key.\n\n"
+        "waste_type options:\n{waste_type_options}\n\n"
+        "packing_method options:\n{packing_method_options}\n\n"
+        "waste_origin options:\n{waste_origin_options}\n\n"
+        "waste_operation_code options:\n{waste_operation_code_options}\n\n"
+        "Rules:\n"
+        "- Do not output keys outside the expected list.\n"
+        "- If a key is missing or uncertain, omit it.\n"
+        "- Do not include markdown fences or extra text.\n"
+        "- For waste_type, packing_method, waste_origin, and waste_operation_code, output "
+        "the option string verbatim — never a paraphrase, translation, or the list number.\n"
+        "- total_weight_kg must be a numeric JSON value in kilograms, never words.\n"
+        "- Convert number words in any language to digits, including Macedonian: "
+        "'пет' is 5, 'сто' is 100, 'илјада' is 1000.\n"
+        "- date must be in YYYY-MM-DD format.\n\n"
+        "User message:\n{message}"
+    )
+
+    chain = create_simple_chain(prompt_template)
+    result = chain.invoke(
+        {
+            "message": message,
+            "waste_type_options": _numbered_options(
+                list(_EWC_HAZARDOUS_CODE_MAP.values()) + list(_EWC_NON_HAZARDOUS_CODE_MAP.values())
+            ),
+            "packing_method_options": _numbered_options(_PACKING_METHODS),
+            "waste_origin_options": _numbered_options(_WASTE_ORIGINS),
+            "waste_operation_code_options": _numbered_options(_WASTE_OPERATIONS_CODES),
+        }
+    )
+
+    raw = result if isinstance(result, str) else str(result)
+    extracted = _normalize_extraction_output(raw, allowed_keys=allowed_keys)
+    return _resolve_ewc_code_from_waste_type(extracted)

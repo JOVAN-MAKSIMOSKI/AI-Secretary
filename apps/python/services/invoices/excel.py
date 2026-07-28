@@ -338,6 +338,24 @@ def fetch_offer_template_payload(tenant_id: str) -> dict[str, Any]:
     )
 
 
+def fetch_identification_form_template_payload(tenant_id: str) -> dict[str, Any]:
+    """Fetch the stored identification-form template bytes and metadata for a tenant."""
+    return _fetch_template_payload(
+        tenant_id=tenant_id,
+        template_table="templatesIdentificationForm",
+        fallback_name="identification-form-template",
+    )
+
+
+def fetch_transport_form_template_payload(tenant_id: str) -> dict[str, Any]:
+    """Fetch the stored transport-form template bytes and metadata for a tenant."""
+    return _fetch_template_payload(
+        tenant_id=tenant_id,
+        template_table="templatesTransportForm",
+        fallback_name="transport-form-template",
+    )
+
+
 def load_invoice_template_workbook(tenant_id: str):
     """Load the stored invoice template into an openpyxl workbook."""
     payload = fetch_invoice_template_payload(tenant_id)

@@ -14,11 +14,16 @@ Pipeline (waste-law RAG advisor, Phase 1):
      E5 requires the "passage: " prefix on documents — queries must use
      "query: " (handled in services/ragagent.py).
 
+Re-ingesting is non-destructive by default: point ids are derived from the
+source file, article and chunk text, so a second run of the same document
+overwrites its own points in place instead of duplicating them. Nothing is
+deleted unless --recreate is passed, and that path snapshots first.
+
 Usage:
     python scripts/ingest.py <file.pdf> [<file2.docx> ...]   # law/date auto-detected per file
     python scripts/ingest.py --law-name "Law on Waste Management 216/2021" \
         --valid-from 2021-01-01 <file.pdf>                   # explicit override
-    python scripts/ingest.py --append <file.pdf>             # add to existing collection
+    python scripts/ingest.py --recreate <file.pdf> ...       # drop the collection first (snapshots)
     python scripts/ingest.py --no-metadata-llm ...           # regex-only metadata
 
 Required env vars (loaded from apps/python/.env):
@@ -34,6 +39,7 @@ System requirements for OCR of scanned pages:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -50,7 +56,15 @@ if _ENV_PATH.exists():
 import fitz  # PyMuPDF
 from llama_index.core.node_parser import SentenceSplitter
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 
 EMBED_MODEL_NAME = "intfloat/multilingual-e5-large"
 EMBED_DIMS = 1024
@@ -84,6 +98,11 @@ GITHUB_MODELS_BASE_URL = "https://models.inference.ai.azure.com"
 EMBED_BATCH_SIZE = 32
 UPSERT_BATCH_SIZE = 100
 
+# Fixed namespace for uuid5 point ids. Must never change: it is what makes a
+# re-ingest overwrite the previous run's points instead of duplicating them.
+POINT_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "waste-law-ingest.ai-secretary")
+CHUNK_HASH_PREFIX_LEN = 16
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_QDRANT_PATH = _REPO_ROOT / "apps" / "agent" / "src" / "rag-agent" / "qdrant_data"
 
@@ -113,13 +132,33 @@ def _build_metadata_llm_client():
     return OpenAI(api_key=token, base_url=GITHUB_MODELS_BASE_URL)
 
 
-def _ensure_collection(client: QdrantClient, collection_name: str, *, append: bool) -> None:
+def _snapshot_before_destroy(client: QdrantClient, collection_name: str) -> None:
+    """Snapshot a collection before dropping it, or abort the run.
+
+    Aborting is deliberate: --recreate is otherwise unrecoverable, and an
+    interrupted rebuild behind it is what destroyed the corpus twice before.
+    Snapshots are a server feature — embedded local-path mode has no such API,
+    which is precisely why those losses had nothing to roll back to.
+    """
+    try:
+        snapshot = client.create_snapshot(collection_name=collection_name)
+    except Exception as exc:
+        sys.exit(
+            f"[ingest] Refusing to --recreate '{collection_name}': snapshot failed ({exc}).\n"
+            "[ingest] Snapshots require a Qdrant server (QDRANT_URL). Start the dev server with\n"
+            "[ingest]   docker compose -f docker-compose.dev.yml up -d"
+        )
+    print(f"[ingest] Snapshot taken before recreate: {getattr(snapshot, 'name', snapshot)}")
+
+
+def _ensure_collection(client: QdrantClient, collection_name: str, *, recreate: bool) -> None:
     existing = {c.name for c in client.get_collections().collections}
     if collection_name in existing:
-        if append:
-            print(f"[ingest] Appending to existing collection '{collection_name}'.")
+        if not recreate:
+            print(f"[ingest] Upserting into existing collection '{collection_name}'.")
             return
-        print(f"[ingest] Collection '{collection_name}' exists — recreating for fresh index.")
+        _snapshot_before_destroy(client, collection_name)
+        print(f"[ingest] --recreate: dropping '{collection_name}' for a fresh index.")
         client.delete_collection(collection_name)
     client.create_collection(
         collection_name=collection_name,
@@ -424,14 +463,66 @@ def _embed_batches(texts: list[str]) -> list[list[float]]:
     return vectors
 
 
-def _upsert(client: QdrantClient, collection_name: str, chunks: list[dict], vectors: list[list[float]]) -> None:
+def _point_id(chunk: dict) -> str:
+    """Content-addressed point id — the same chunk always resolves to the same id.
+
+    Random uuid4 ids were what forced the old delete-the-whole-collection-first
+    design: without a stable id a re-ingest could only append, doubling the
+    corpus. Keyed on position (file/article/part) *and* a hash of the text, so
+    edited text lands on a new id while untouched text overwrites itself.
+    """
+    text_hash = hashlib.sha256(chunk["text"].encode("utf-8")).hexdigest()[:CHUNK_HASH_PREFIX_LEN]
+    key = f"{chunk['source_file']}|{chunk['article']}|{chunk['part']}|{text_hash}"
+    return str(uuid.uuid5(POINT_ID_NAMESPACE, key))
+
+
+def _upsert(
+    client: QdrantClient,
+    collection_name: str,
+    chunks: list[dict],
+    vectors: list[list[float]],
+    run_id: str,
+) -> None:
     points = [
-        PointStruct(id=str(uuid.uuid4()), vector=vectors[i], payload=chunks[i])
+        PointStruct(
+            id=_point_id(chunks[i]),
+            vector=vectors[i],
+            payload={**chunks[i], "ingest_run_id": run_id},
+        )
         for i in range(len(chunks))
     ]
     for i in range(0, len(points), UPSERT_BATCH_SIZE):
         client.upsert(collection_name=collection_name, points=points[i : i + UPSERT_BATCH_SIZE])
     print(f"[ingest] Upserted {len(points)} points into '{collection_name}'.")
+
+
+def _prune_superseded(
+    client: QdrantClient, collection_name: str, source_files: set[str], run_id: str
+) -> None:
+    """Drop points of the ingested files that this run did not rewrite.
+
+    Deterministic ids mean the upsert already replaced every chunk that still
+    exists, so whatever is left carrying an older run_id is a chunk the source
+    document no longer contains (an article was deleted, or re-parsing split it
+    differently). Scoped to the files just ingested — points belonging to any
+    other document are never matched.
+
+    Runs strictly after the upsert so there is no window in which a file has
+    been cleared but not yet rewritten.
+    """
+    for source_file in sorted(source_files):
+        client.delete(
+            collection_name=collection_name,
+            points_selector=FilterSelector(
+                filter=Filter(
+                    must=[FieldCondition(key="source_file", match=MatchValue(value=source_file))],
+                    must_not=[
+                        FieldCondition(key="ingest_run_id", match=MatchValue(value=run_id))
+                    ],
+                )
+            ),
+        )
+    print(f"[ingest] Pruned superseded points for {len(source_files)} file(s).")
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +532,11 @@ def _upsert(client: QdrantClient, collection_name: str, chunks: list[dict], vect
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ingest law PDFs/DOCX into Qdrant.")
     parser.add_argument("files", nargs="+", help="PDF/DOCX files to ingest")
-    parser.add_argument("--append", action="store_true", help="add to the existing collection instead of recreating it")
+    parser.add_argument(
+        "--recreate",
+        action="store_true",
+        help="drop and rebuild the whole collection (snapshots first); default is a non-destructive upsert",
+    )
     # Optional: when omitted, each file's law title/date is auto-detected from
     # its first page (the corpus bundles many amendments with opaque filenames).
     parser.add_argument("--law-name", default=None, help='override, e.g. "Law on Waste Management 216/2021"')
@@ -474,8 +569,12 @@ def main() -> None:
     if llm_client is None and not args.no_metadata_llm:
         print("[ingest] No GITHUB_MODELS_TOKEN — falling back to regex metadata.", file=sys.stderr)
 
-    _ensure_collection(qdrant, collection_name, append=args.append)
-
+    # Order matters more than anything else in this function. Extraction, OCR,
+    # metadata and embedding all complete *before* the collection is touched, so
+    # the failure modes that dominate this pipeline — OCR crash, LLM quota
+    # exhausted, cancelled run — leave the existing corpus fully intact. The
+    # previous order deleted first and wrote back last, turning any interruption
+    # into total loss; that is how the corpus was destroyed twice.
     chunks = _load_and_chunk(paths, law_name=args.law_name, valid_from=args.valid_from, llm_client=llm_client)
     if not chunks:
         print("[ingest] No chunks extracted — aborting.", file=sys.stderr)
@@ -483,7 +582,11 @@ def main() -> None:
 
     print(f"[ingest] Total chunks: {len(chunks)}")
     vectors = _embed_batches([c["text"] for c in chunks])
-    _upsert(qdrant, collection_name, chunks, vectors)
+
+    run_id = uuid.uuid4().hex
+    _ensure_collection(qdrant, collection_name, recreate=args.recreate)
+    _upsert(qdrant, collection_name, chunks, vectors, run_id)
+    _prune_superseded(qdrant, collection_name, {c["source_file"] for c in chunks}, run_id)
     print("[ingest] Done.")
 
 

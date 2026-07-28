@@ -21,6 +21,8 @@ supabase: Client = create_client(url, key)
 ALLOWED_DOCUMENT_FOLDERS = {
     "invoices": {"xlsx"},
     "offers": {"docx"},
+    "identification-forms": {"docx"},
+    "transport-forms": {"docx"},
     "templates": {"xlsx", "docx"},
 }
 
@@ -31,7 +33,7 @@ def build_document_path(tenant_id, folder, document_id, extension):
 
     if normalized_folder not in ALLOWED_DOCUMENT_FOLDERS:
         raise ValueError(
-            "Invalid folder. Expected one of: invoices, offers, templates."
+            "Invalid folder. Expected one of: " + ", ".join(sorted(ALLOWED_DOCUMENT_FOLDERS)) + "."
         )
 
     if normalized_extension not in ALLOWED_DOCUMENT_FOLDERS[normalized_folder]:
@@ -69,6 +71,14 @@ def upload_invoice_document(tenant_id, document_id, file_content):
 
 def upload_offer_document(tenant_id, document_id, file_content):
     return _upload_document(tenant_id, "offers", document_id, "docx", file_content)
+
+
+def upload_identification_form_document(tenant_id, document_id, file_content):
+    return _upload_document(tenant_id, "identification-forms", document_id, "docx", file_content)
+
+
+def upload_transport_form_document(tenant_id, document_id, file_content):
+    return _upload_document(tenant_id, "transport-forms", document_id, "docx", file_content)
 
 
 def upload_template_document(tenant_id, template_id, extension, file_content):

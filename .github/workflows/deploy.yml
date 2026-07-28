@@ -38,6 +38,14 @@ jobs:
       - name: Type-check agent (tsc strict, no emit)
         run: pnpm --filter agent type-check
 
+      # apps/python reads the waste reference lists from generated JSON, but
+      # wasteChapters.ts is their only source. Regenerate and fail on any diff so a code
+      # map edited on one side can never silently disagree with the other.
+      - name: Waste reference JSON matches wasteChapters.ts
+        run: |
+          pnpm --filter agent gen:waste-reference
+          git diff --exit-code apps/python/resources/waste_reference.json
+
       # Step order is deliberate: every free deterministic check runs before the one
       # step that spends money, so a broken build never buys API calls to find out.
 

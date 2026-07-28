@@ -275,6 +275,189 @@ async function executeChain(
       return 'Понудата е подготвена. Можете да ја видите во вашиот панел.';
     }
 
+    case 'identification_form_extraction': {
+      try {
+        // Step 1: extract + resolve. The Python endpoint returns the waste fields plus
+        // derived ewc_code/is_hazardous and the resolved firm_id/contact_id (contact
+        // scoped to the firm), the same way invoice extraction resolves firm_id.
+        const extracted = ((await callPythonExtraction(
+          '/documents/extract-identification-form',
+          transcript,
+          tenantId,
+        )).extracted ?? {}) as Record<string, unknown>;
+
+        const asString = (value: unknown): string | undefined =>
+          typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+
+        const firmId = asString(extracted.firm_id);
+        const firmName = asString(extracted.firm_name);
+        const contactId = asString(extracted.contact_id);
+        if (!firmId || !firmName) {
+          return 'Не можев да ја идентификувам фирмата. Ве молам осигурете се дека името на фирмата е јасно.';
+        }
+        if (!contactId) {
+          return 'Не можев да го идентификувам одговорното лице за таа фирма. Ве молам осигурете се дека името е јасно.';
+        }
+
+        // Step 2: build the render payload. is_hazardous is a real boolean here; the
+        // remaining fields are the snapped closed-list values from extraction.
+        const identificationPayload = {
+          firm_id: firmId,
+          contact_id: contactId,
+          firm_name: firmName,
+          waste_location: asString(extracted.waste_location),
+          is_hazardous: typeof extracted.is_hazardous === 'boolean' ? extracted.is_hazardous : undefined,
+          waste_type: asString(extracted.waste_type),
+          ewc_code: asString(extracted.ewc_code),
+          packing_method: asString(extracted.packing_method),
+          total_weight_kg: extracted.total_weight_kg,
+          waste_origin: asString(extracted.waste_origin),
+          waste_operation_code: asString(extracted.waste_operation_code),
+          place: asString(extracted.place),
+          date: asString(extracted.date),
+        };
+
+        // Any missing required field means extraction did not capture enough; the
+        // render route's Pydantic gate would 422, so fail early with a spoken hint.
+        const missing = Object.entries(identificationPayload)
+          .filter(([, v]) => v === undefined || v === null || v === '')
+          .map(([k]) => k);
+        if (missing.length > 0) {
+          return 'Не можев да ги извлечам сите потребни детали за формуларот. Ве молам наведете го описот на отпадот, количината и локацијата.';
+        }
+
+        // Step 3: generate + store with origin='call'. Like the invoice voice path, the
+        // streamed docx is discarded here — the form is retrieved later from the
+        // dashboard's pending-call card (origin='call', downloaded_at IS NULL).
+        const secret = process.env.INTER_SERVICE_SECRET;
+        if (!secret) throw new Error('INTER_SERVICE_SECRET is not configured.');
+
+        const genResponse = await fetch(`${PY_SERVICE_URL}/documents/identification-form`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Service-Secret': secret,
+            'X-Tenant-Id': tenantId,
+            'X-Document-Origin': 'call',
+          },
+          body: JSON.stringify(identificationPayload),
+        });
+
+        if (!genResponse.ok) {
+          const errText = await genResponse.text().catch(() => '');
+          logger.error(
+            { status: genResponse.status, body: errText },
+            'Identification-form generation endpoint failed',
+          );
+          return 'Не можев да го генерирам формуларот. Ве молам проверете дали сите детали се точни.';
+        }
+
+        // Drain the docx body so the connection is released cleanly.
+        await genResponse.arrayBuffer();
+
+        return 'Идентификациониот формулар е успешно генериран. Можете да го преземете од вашиот панел.';
+      } catch (err) {
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Identification-form generation from voice failed',
+        );
+        return 'Не можев да го генерирам формуларот. Ве молам осигурете се дека деталите се јасни.';
+      }
+    }
+
+    case 'transport_form_extraction': {
+      try {
+        // Step 1: extract + resolve, same shape as the identification form above. Python
+        // returns the waste fields plus derived ewc_code/is_hazardous and both resolved
+        // party ids — here the two lookups are independent, since a disposal place is
+        // tenant-wide and has no owning-firm relationship.
+        const extracted = ((await callPythonExtraction(
+          '/documents/extract-transport-form',
+          transcript,
+          tenantId,
+        )).extracted ?? {}) as Record<string, unknown>;
+
+        const asString = (value: unknown): string | undefined =>
+          typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+
+        const firmId = asString(extracted.firm_id);
+        const firmName = asString(extracted.firm_name);
+        const disposalPlaceId = asString(extracted.disposal_place_id);
+        const disposalPlaceName = asString(extracted.disposal_place_name);
+        if (!firmId || !firmName) {
+          return 'Не можев да ја идентификувам фирмата која го предава отпадот. Ве молам осигурете се дека името на фирмата е јасно.';
+        }
+        if (!disposalPlaceId || !disposalPlaceName) {
+          return 'Не можев да ја идентификувам депонијата која го прима отпадот. Ве молам кажете го името на депонијата.';
+        }
+
+        // Step 2: build the render payload. note is optional, so it is added after the
+        // required-field check rather than being counted as missing when absent.
+        const transportPayload = {
+          firm_id: firmId,
+          disposal_place_id: disposalPlaceId,
+          firm_name: firmName,
+          disposal_place_name: disposalPlaceName,
+          waste_type: asString(extracted.waste_type),
+          // Both derived in Python from waste_type. They come back absent when the waste
+          // matched no code map, which must fail here rather than ship a fabricated EWC
+          // code on a legal document.
+          is_hazardous: typeof extracted.is_hazardous === 'boolean' ? extracted.is_hazardous : undefined,
+          ewc_code: asString(extracted.ewc_code),
+          waste_owner_total_kg: extracted.waste_owner_total_kg,
+          collector_total_kg: extracted.collector_total_kg,
+          collector_date: asString(extracted.collector_date),
+          end_owner_total_kg: extracted.end_owner_total_kg,
+          end_owner_date: asString(extracted.end_owner_date),
+        };
+
+        const missing = Object.entries(transportPayload)
+          .filter(([, v]) => v === undefined || v === null || v === '')
+          .map(([k]) => k);
+        if (missing.length > 0) {
+          return 'Не можев да ги извлечам сите потребни детали за транспортниот формулар. Ве молам наведете го видот на отпадот, количините и датумите на предавање и прием.';
+        }
+
+        // Step 3: generate + store with origin='call'. Like the identification-form voice
+        // path, the streamed docx is discarded here — the form is retrieved later from the
+        // dashboard's pending-call card (origin='call', downloaded_at IS NULL).
+        const secret = process.env.INTER_SERVICE_SECRET;
+        if (!secret) throw new Error('INTER_SERVICE_SECRET is not configured.');
+
+        const note = asString(extracted.note);
+        const genResponse = await fetch(`${PY_SERVICE_URL}/documents/transport-form`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Service-Secret': secret,
+            'X-Tenant-Id': tenantId,
+            'X-Document-Origin': 'call',
+          },
+          body: JSON.stringify(note ? { ...transportPayload, note } : transportPayload),
+        });
+
+        if (!genResponse.ok) {
+          const errText = await genResponse.text().catch(() => '');
+          logger.error(
+            { status: genResponse.status, body: errText },
+            'Transport-form generation endpoint failed',
+          );
+          return 'Не можев да го генерирам транспортниот формулар. Ве молам проверете дали сите детали се точни.';
+        }
+
+        // Drain the docx body so the connection is released cleanly.
+        await genResponse.arrayBuffer();
+
+        return 'Транспортниот формулар е успешно генериран. Можете да го преземете од вашиот панел.';
+      } catch (err) {
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Transport-form generation from voice failed',
+        );
+        return 'Не можев да го генерирам транспортниот формулар. Ве молам осигурете се дека деталите се јасни.';
+      }
+    }
+
     // Read-only query chains — data fetch is shared with the web path via chainHandlers;
     // only the spoken Macedonian phrasing is voice-specific (voicePhrasing).
     case 'task_query': {

@@ -25,6 +25,7 @@ def _to_response(row: dict) -> ContactResponse:
     return ContactResponse(
         id=row["id"],
         tenant_id=row["tenant_id"],
+        firm_id=row["firm_id"],
         name=row["name"],
         email=row["email"],
         phone_number=row["phone_number"],
@@ -33,12 +34,41 @@ def _to_response(row: dict) -> ContactResponse:
     )
 
 
+def _require_firm_of_tenant(firm_id: str, owner_auth_id: str) -> None:
+    """Reject a contact whose firm_id is not a real firm owned by this tenant.
+
+    A contact belongs to exactly one firm, and a caller must not attach one to a firm
+    from another tenant (or a non-existent id). The DB FK would reject a bad id anyway,
+    but this returns a clear 400/404 instead of a raw constraint error, and it enforces
+    the tenant boundary the FK alone does not.
+    """
+    _require_uuid(firm_id, "firm_id")
+    try:
+        response = (
+            supabase.table("firms")
+            .select("id")
+            .eq("id", firm_id)
+            .eq("tenant_id", owner_auth_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        raise safe_http_error(exc, status.HTTP_400_BAD_REQUEST, "Failed to verify firm.") from exc
+
+    if not (response.data or []):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Firm not found for this tenant.",
+        )
+
+
 @router.post("", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
 def create_contact(
     payload: ContactCreateRequest,
     current_user_id: str = Depends(get_current_user_id),
 ) -> ContactResponse:
     owner_auth_id = require_tenant_owner_auth_id(current_user_id)
+    _require_firm_of_tenant(payload.firm_id, owner_auth_id)
 
     try:
         response = (
@@ -46,6 +76,7 @@ def create_contact(
             .insert(
                 {
                     "tenant_id": owner_auth_id,
+                    "firm_id": payload.firm_id,
                     "name": payload.name.strip(),
                     "email": payload.email,
                     "phone_number": payload.phone_number.strip(),
@@ -97,12 +128,14 @@ def update_contact_by_id(
 ) -> ContactResponse:
     _require_uuid(contact_id, "contact_id")
     owner_auth_id = require_tenant_owner_auth_id(current_user_id)
+    _require_firm_of_tenant(payload.firm_id, owner_auth_id)
 
     try:
         response = (
             supabase.table("contacts")
             .update(
                 {
+                    "firm_id": payload.firm_id,
                     "name": payload.name.strip(),
                     "email": payload.email,
                     "phone_number": payload.phone_number.strip(),

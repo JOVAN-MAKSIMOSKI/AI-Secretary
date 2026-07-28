@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   createFirmProfile,
@@ -61,6 +61,7 @@ const EMPTY_DISPOSAL_FORM = {
 };
 
 const EMPTY_CONTACT_FORM = {
+  firm_id: "",
   name: "",
   email: "",
   phone_number: "",
@@ -147,6 +148,13 @@ export default function Parties() {
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [contactEditForm, setContactEditForm] = useState(EMPTY_CONTACT_FORM);
   const [submittingContactEdit, setSubmittingContactEdit] = useState(false);
+
+  // firm_id → firm name, so a contact card can show which firm it belongs to without
+  // an extra fetch. `clients` holds the firms (this page predates the client→firm rename).
+  const firmNameById = useMemo(
+    () => new Map(clients.map((firm) => [firm.id, firm.name])),
+    [clients]
+  );
 
   // Directory toggle — the URL ?tab= param is the source of truth so the
   // selection survives reloads, deep links, and the back button.
@@ -480,9 +488,15 @@ export default function Parties() {
       return;
     }
 
+    if (!contactForm.firm_id) {
+      setContactError("Select the firm this contact belongs to.");
+      return;
+    }
+
     setSubmittingContact(true);
     try {
       const created = await createContact({
+        firm_id: contactForm.firm_id,
         name: contactForm.name.trim(),
         email: contactForm.email.trim(),
         phone_number: contactForm.phone_number.trim(),
@@ -533,6 +547,7 @@ export default function Parties() {
     setActiveMenuContactId(null);
     setEditingContactId(contact.id);
     setContactEditForm({
+      firm_id: contact.firm_id,
       name: contact.name,
       email: contact.email,
       phone_number: contact.phone_number,
@@ -557,12 +572,18 @@ export default function Parties() {
       return;
     }
 
+    if (!contactEditForm.firm_id) {
+      setContactError("Select the firm this contact belongs to.");
+      return;
+    }
+
     setContactError("");
     setContactSuccess("");
     setSubmittingContactEdit(true);
 
     try {
       const updated = await updateContactById(editingContactId, {
+        firm_id: contactEditForm.firm_id,
         name: contactEditForm.name.trim(),
         email: contactEditForm.email.trim(),
         phone_number: contactEditForm.phone_number.trim(),
@@ -1329,6 +1350,25 @@ export default function Parties() {
 
             <form onSubmit={handleCreateContact} className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-2 md:col-span-2">
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Firm</span>
+                  <select
+                    value={contactForm.firm_id}
+                    onChange={(event) => setContactForm((f) => ({ ...f, firm_id: event.target.value }))}
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+                    required
+                  >
+                    <option value="" disabled>
+                      Select a firm…
+                    </option>
+                    {clients.map((firm) => (
+                      <option key={firm.id} value={firm.id}>
+                        {firm.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
                 <label className="block space-y-2">
                   <span className="text-sm font-medium text-[var(--brand-ink)]">Name</span>
                   <input
@@ -1436,6 +1476,25 @@ export default function Parties() {
 
             <form onSubmit={handleEditContact} className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
+                <label className="block space-y-2 md:col-span-2">
+                  <span className="text-sm font-medium text-[var(--brand-ink)]">Firm</span>
+                  <select
+                    value={contactEditForm.firm_id}
+                    onChange={(event) => setContactEditForm((f) => ({ ...f, firm_id: event.target.value }))}
+                    className="h-11 w-full rounded-lg border border-[var(--brand-border)] bg-[var(--brand-surface)] px-4 text-sm outline-none transition focus:border-[var(--brand-teal)] focus:bg-white"
+                    required
+                  >
+                    <option value="" disabled>
+                      Select a firm…
+                    </option>
+                    {clients.map((firm) => (
+                      <option key={firm.id} value={firm.id}>
+                        {firm.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
                 <label className="block space-y-2">
                   <span className="text-sm font-medium text-[var(--brand-ink)]">Name</span>
                   <input
@@ -1805,7 +1864,9 @@ export default function Parties() {
                           </span>
                           <div className="min-w-0">
                             <p className="truncate font-semibold leading-tight text-[var(--brand-ink)]">{contact.name}</p>
-                            <p className="truncate text-[13px] leading-tight text-[var(--brand-text-muted)]">{contact.email}</p>
+                            <p className="truncate text-[13px] leading-tight text-[var(--brand-text-muted)]">
+                              {firmNameById.get(contact.firm_id) ?? "—"} · {contact.email}
+                            </p>
                           </div>
                         </div>
                       </div>

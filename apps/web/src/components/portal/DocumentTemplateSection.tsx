@@ -5,9 +5,10 @@ import { useSessionStore } from "../../store/session";
 
 const TEMPLATE_TYPES = ["invoice", "offer", "transport_form", "identification_form"] as const;
 const TEMPLATE_EXTENSIONS = ["xlsx", "docx"] as const;
-// The two waste forms exist only as Excel templates — no Word variant — so the
-// extension is locked to xlsx whenever one of them is selected.
-const XLSX_ONLY_TEMPLATE_TYPES: ReadonlySet<(typeof TEMPLATE_TYPES)[number]> = new Set([
+// Both waste forms are authored in Word and rendered by the run-level docx renderer, so
+// the extension is locked to docx when either is selected. Mirrors docx_only_doc_types
+// in apps/python/routers/documents.py — a mismatch here only produces a 400 there.
+const DOCX_ONLY_TEMPLATE_TYPES: ReadonlySet<(typeof TEMPLATE_TYPES)[number]> = new Set([
   "transport_form",
   "identification_form",
 ]);
@@ -108,11 +109,11 @@ export default function DocumentTemplateSection() {
                   setDocType(nextDocType);
                   setError("");
 
-                  // Waste forms are xlsx-only: force the extension and drop any
-                  // now-invalid (e.g. .docx) file the user had already chosen.
-                  if (XLSX_ONLY_TEMPLATE_TYPES.has(nextDocType) && extension !== "xlsx") {
-                    setExtension("xlsx");
-                    if (file && !fileMatchesExtension(file, "xlsx")) {
+                  // Waste forms are docx-only: force the extension and drop any
+                  // now-invalid (e.g. .xlsx) file the user had already chosen.
+                  if (DOCX_ONLY_TEMPLATE_TYPES.has(nextDocType) && extension !== "docx") {
+                    setExtension("docx");
+                    if (file && !fileMatchesExtension(file, "docx")) {
                       setFile(null);
                     }
                   }
@@ -147,7 +148,7 @@ export default function DocumentTemplateSection() {
                   <option
                     key={option}
                     value={option}
-                    disabled={option !== "xlsx" && XLSX_ONLY_TEMPLATE_TYPES.has(docType)}
+                    disabled={option !== "docx" && DOCX_ONLY_TEMPLATE_TYPES.has(docType)}
                   >
                     {option}
                   </option>

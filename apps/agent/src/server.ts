@@ -701,6 +701,174 @@ app.post('/invoices/call-downloads/confirm', requireAuth, async (req: Authentica
 	}
 });
 
+// Identification-form call-download routes — mirror the invoice trio above. A form
+// generated over a Twilio call has origin='call' and no browser download, so it waits in
+// the dashboard's pending-call-forms card until the owner downloads it here.
+app.get('/identification-forms/pending-call-downloads', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('identification_forms')
+			.select('id, title, created_at')
+			.eq('tenant_id', tenantId)
+			.eq('origin', 'call')
+			.is('downloaded_at', null)
+			.order('created_at', { ascending: true });
+		if (error) throw new Error(error.message);
+		const forms = data ?? [];
+		res.json({ count: forms.length, forms });
+	} catch (error) {
+		res.status(400).json({ error: toSafeError(error, 'Failed to fetch pending call forms.') });
+	}
+});
+
+app.post('/identification-forms/call-downloads/zip', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('identification_forms')
+			.select('id')
+			.eq('tenant_id', tenantId)
+			.eq('origin', 'call')
+			.is('downloaded_at', null)
+			.order('created_at', { ascending: true });
+		if (error) throw new Error(error.message);
+		const pending = data ?? [];
+		if (pending.length === 0) {
+			res.status(404).json({ error: 'No pending call forms to download.' });
+			return;
+		}
+		const zip = new JSZip();
+		for (const form of pending) {
+			const { buffer, filename } = await getDocumentBuffer(tenantId, form.id as string, 'identification-form');
+			zip.file(filename, buffer);
+		}
+		const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+		res.setHeader('Content-Type', 'application/zip');
+		res.setHeader('Content-Disposition', 'attachment; filename="identification-forms.zip"');
+		res.send(zipBuffer);
+	} catch (error) {
+		res.status(500).json({ error: toSafeError(error, 'Failed to build identification-form ZIP.') });
+	}
+});
+
+app.post('/identification-forms/call-downloads/confirm', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	const rawIds: unknown = req.body?.ids;
+	if (!Array.isArray(rawIds) || rawIds.length === 0) {
+		res.status(422).json({ error: 'ids must be a non-empty array.' });
+		return;
+	}
+	const ids = rawIds.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id));
+	if (ids.length === 0) {
+		res.status(422).json({ error: 'No valid form ids provided.' });
+		return;
+	}
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('identification_forms')
+			.update({ downloaded_at: new Date().toISOString() })
+			.eq('tenant_id', tenantId)
+			.in('id', ids)
+			.eq('origin', 'call')
+			.select('id');
+		if (error) throw new Error(error.message);
+		res.json({ confirmed: data?.length ?? 0 });
+	} catch (error) {
+		res.status(400).json({ error: toSafeError(error, 'Failed to confirm form downloads.') });
+	}
+});
+
+// Transport-form call-download routes — the same trio again, against transport_forms.
+// Kept as a separate set rather than a generic /:formType route so each stays explicit
+// about the table it reads and the storage folder its ZIP pulls from.
+app.get('/transport-forms/pending-call-downloads', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('transport_forms')
+			.select('id, title, created_at')
+			.eq('tenant_id', tenantId)
+			.eq('origin', 'call')
+			.is('downloaded_at', null)
+			.order('created_at', { ascending: true });
+		if (error) throw new Error(error.message);
+		const forms = data ?? [];
+		res.json({ count: forms.length, forms });
+	} catch (error) {
+		res.status(400).json({ error: toSafeError(error, 'Failed to fetch pending call transport forms.') });
+	}
+});
+
+app.post('/transport-forms/call-downloads/zip', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('transport_forms')
+			.select('id')
+			.eq('tenant_id', tenantId)
+			.eq('origin', 'call')
+			.is('downloaded_at', null)
+			.order('created_at', { ascending: true });
+		if (error) throw new Error(error.message);
+		const pending = data ?? [];
+		if (pending.length === 0) {
+			res.status(404).json({ error: 'No pending call transport forms to download.' });
+			return;
+		}
+		const zip = new JSZip();
+		for (const form of pending) {
+			const { buffer, filename } = await getDocumentBuffer(tenantId, form.id as string, 'transport-form');
+			zip.file(filename, buffer);
+		}
+		const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+		res.setHeader('Content-Type', 'application/zip');
+		res.setHeader('Content-Disposition', 'attachment; filename="transport-forms.zip"');
+		res.send(zipBuffer);
+	} catch (error) {
+		res.status(500).json({ error: toSafeError(error, 'Failed to build transport-form ZIP.') });
+	}
+});
+
+app.post('/transport-forms/call-downloads/confirm', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	const userAuthId = req.userAuthId;
+	if (!userAuthId) { res.status(401).json({ error: 'Missing authenticated user.' }); return; }
+	const rawIds: unknown = req.body?.ids;
+	if (!Array.isArray(rawIds) || rawIds.length === 0) {
+		res.status(422).json({ error: 'ids must be a non-empty array.' });
+		return;
+	}
+	const ids = rawIds.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id));
+	if (ids.length === 0) {
+		res.status(422).json({ error: 'No valid form ids provided.' });
+		return;
+	}
+	try {
+		const tenantId = await getTenantForUser(userAuthId);
+		const { data, error } = await supabase
+			.from('transport_forms')
+			.update({ downloaded_at: new Date().toISOString() })
+			.eq('tenant_id', tenantId)
+			.in('id', ids)
+			.eq('origin', 'call')
+			.select('id');
+		if (error) throw new Error(error.message);
+		res.json({ confirmed: data?.length ?? 0 });
+	} catch (error) {
+		res.status(400).json({ error: toSafeError(error, 'Failed to confirm transport-form downloads.') });
+	}
+});
+
 app.post(
 	'/agent/resolve-and-run',
 	requireAuth,
