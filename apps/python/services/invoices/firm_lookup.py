@@ -212,14 +212,29 @@ def _select_best_fuzzy_match(rows: list[dict[str, Any]], normalized_target: str)
     return None
 
 
-def fetch_firm_contact_by_name(owner_auth_id: str, firm_name: str) -> dict[str, Any]:
-    """Fetch firm id, tax number, and email for a tenant by firm name."""
+# Column set the invoice flow needs. Kept as the default so that path is unchanged.
+_INVOICE_FIRM_COLUMNS = "id, name, tax_number, email"
+# The identification form additionally reads the firm's address and waste permit onto
+# the rendered document, so it requests a wider set.
+_IDENTIFICATION_FIRM_COLUMNS = "id, name, tax_number, email, address, permit_number"
+# The transport form renders the firm as the waste owner: name + address in section 4,
+# and city as the handover town ("Во …") shared by sections 4/5. It carries the
+# collector's own permit (from businesses), not the firm's, so permit_number is absent.
+_TRANSPORT_FORM_FIRM_COLUMNS = "id, name, tax_number, email, address, city"
+
+
+def _find_firm_row_by_name(owner_auth_id: str, firm_name: str, columns: str) -> dict[str, Any]:
+    """Resolve a single firm row by name: exact → ilike → transliteration-aware fuzzy.
+
+    `columns` is the SELECT list, so callers fetch only what they consume. Raises
+    ValueError when nothing clears the fuzzy threshold.
+    """
     normalized_name = _normalize_firm_name(firm_name)
     raw_name = " ".join(firm_name.strip().split())
 
     exact_response = (
         supabase.table("firms")
-        .select("id, name, tax_number, email")
+        .select(columns)
         .eq("tenant_id", owner_auth_id)
         .eq("name", raw_name)
         .limit(1)
@@ -230,7 +245,7 @@ def fetch_firm_contact_by_name(owner_auth_id: str, firm_name: str) -> dict[str, 
     if not rows:
         fallback_response = (
             supabase.table("firms")
-            .select("id, name, tax_number, email")
+            .select(columns)
             .eq("tenant_id", owner_auth_id)
             .ilike("name", f"%{raw_name}%")
             .limit(25)
@@ -248,7 +263,7 @@ def fetch_firm_contact_by_name(owner_auth_id: str, firm_name: str) -> dict[str, 
 
         fuzzy_response = (
             supabase.table("firms")
-            .select("id, name, tax_number, email")
+            .select(columns)
             .eq("tenant_id", owner_auth_id)
             .ilike("name", f"%{raw_anchor}%")
             .limit(MAX_FUZZY_CANDIDATES)
@@ -262,7 +277,7 @@ def fetch_firm_contact_by_name(owner_auth_id: str, firm_name: str) -> dict[str, 
         if not fuzzy_rows:
             fallback_all = (
                 supabase.table("firms")
-                .select("id, name, tax_number, email")
+                .select(columns)
                 .eq("tenant_id", owner_auth_id)
                 .limit(MAX_FUZZY_CANDIDATES)
                 .execute()
@@ -288,12 +303,47 @@ def fetch_firm_contact_by_name(owner_auth_id: str, firm_name: str) -> dict[str, 
             f"No firm found for tenant '{owner_auth_id}' with name '{firm_name}'."
         )
 
-    row = rows[0]
+    return rows[0]
+
+
+def fetch_firm_contact_by_name(owner_auth_id: str, firm_name: str) -> dict[str, Any]:
+    """Fetch firm id, tax number, and email for a tenant by firm name."""
+    row = _find_firm_row_by_name(owner_auth_id, firm_name, _INVOICE_FIRM_COLUMNS)
     return {
         "firm_id": row.get("id"),
         "firm_name": row.get("name"),
         "firm_tax_number": row.get("tax_number"),
         "firm_email": row.get("email"),
+    }
+
+
+def fetch_firm_for_identification_form(owner_auth_id: str, firm_name: str) -> dict[str, Any]:
+    """Fetch the firm fields an identification form renders: id, name, tax number,
+    address, and waste permit number. Address and permit_number are nullable in the
+    schema; they are returned as-is here and the render route rejects a form whose
+    required legal boxes would be blank."""
+    row = _find_firm_row_by_name(owner_auth_id, firm_name, _IDENTIFICATION_FIRM_COLUMNS)
+    return {
+        "firm_id": row.get("id"),
+        "firm_name": row.get("name"),
+        "firm_tax_number": row.get("tax_number"),
+        "firm_address": row.get("address"),
+        "firm_permit_number": row.get("permit_number"),
+    }
+
+
+def fetch_firm_for_transport_form(owner_auth_id: str, firm_name: str) -> dict[str, Any]:
+    """Fetch the firm fields a transport form renders: id, name, tax number, address,
+    and city. Address and city are nullable in the schema; they are returned as-is here
+    and the render route rejects a form whose required legal boxes would be blank —
+    city is the handover town in sections 4/5, so a blank one leaves "Во ___" empty."""
+    row = _find_firm_row_by_name(owner_auth_id, firm_name, _TRANSPORT_FORM_FIRM_COLUMNS)
+    return {
+        "firm_id": row.get("id"),
+        "firm_name": row.get("name"),
+        "firm_tax_number": row.get("tax_number"),
+        "firm_address": row.get("address"),
+        "firm_city": row.get("city"),
     }
 
 

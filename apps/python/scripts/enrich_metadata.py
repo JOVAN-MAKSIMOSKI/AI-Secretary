@@ -34,6 +34,28 @@ if _ENV_PATH.exists():
 from openai import OpenAI
 from qdrant_client import QdrantClient
 
+def _build_qdrant_client() -> QdrantClient:
+    """Resolve QDRANT_URL first, then a local path — matching ingest.py and ragagent.py.
+
+    This script previously only ever opened a local path, so it silently missed
+    the server after dev moved to one. It refuses to create a missing local
+    directory rather than falling back to an empty store: this is a repair tool,
+    and an empty store means "cannot find your data", never "start a new one".
+    """
+    qdrant_url = os.getenv("QDRANT_URL", "").strip()
+    if qdrant_url:
+        return QdrantClient(url=qdrant_url, api_key=os.getenv("QDRANT_API_KEY", "").strip() or None)
+
+    local_path = Path(os.getenv("QDRANT_LOCAL_PATH", str(_DEFAULT_QDRANT_PATH))).resolve()
+    if not local_path.exists():
+        sys.exit(
+            f"[enrich] No QDRANT_URL set and local path does not exist: {local_path}\n"
+            "[enrich] Start the dev server (docker compose -f docker-compose.dev.yml up -d) "
+            "and set QDRANT_URL."
+        )
+    return QdrantClient(path=str(local_path))
+
+
 MODEL = "gpt-4o-mini"
 DEFAULT_COLLECTION = "waste_management_law_mk_v2"
 SCROLL_BATCH = 500
@@ -88,8 +110,7 @@ def main() -> None:
     llm = OpenAI(api_key=api_key) if api_key else None
 
     collection = os.getenv("QDRANT_COLLECTION", DEFAULT_COLLECTION)
-    local_path = Path(os.getenv("QDRANT_LOCAL_PATH", str(_DEFAULT_QDRANT_PATH))).resolve()
-    qdrant = QdrantClient(path=str(local_path))
+    qdrant = _build_qdrant_client()
 
     points = _scroll_all(qdrant, collection)
     print(f"[enrich] {len(points)} points in '{collection}'")

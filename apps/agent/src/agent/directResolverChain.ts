@@ -64,6 +64,20 @@ export async function runDirectResolverChain(input: {
     case 'offer_extraction':
       handlerResult = await callPythonExtraction('/documents/extract-offer', input.accessToken, input.message);
       break;
+    case 'identification_form_extraction':
+      handlerResult = await callPythonExtraction(
+        '/documents/extract-identification-form',
+        input.accessToken,
+        input.message,
+      );
+      break;
+    case 'transport_form_extraction':
+      handlerResult = await callPythonExtraction(
+        '/documents/extract-transport-form',
+        input.accessToken,
+        input.message,
+      );
+      break;
     case 'calendar_event_extraction':
       {
         const extractionPayload = await callPythonExtraction('/documents/extract-calendar', input.accessToken, input.message);

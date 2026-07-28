@@ -33,6 +33,7 @@ model firms {
   offers     offers[]
   transport_forms transport_forms[]
   identification_forms identification_forms[]
+  contacts   contacts[]
 
   @@index([tenant_id])
   @@schema("public")
@@ -208,6 +209,10 @@ model businesses {
 model contacts {
   id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id    String     @db.Uuid
+  // A contact belongs to exactly one firm (the responsible person for that firm's
+  // waste). NOT NULL: every contact is created under a firm. Cascade so deleting a
+  // firm removes its contacts.
+  firm_id      String     @db.Uuid
   name         String
   email        String
   // Text, not numeric: preserves leading zeros, '+' country codes, and separators.
@@ -215,9 +220,11 @@ model contacts {
   address      String
   created_at   DateTime   @default(now()) @db.Timestamptz(6)
   businesses   businesses @relation(fields: [tenant_id], references: [owner_auth_id], onDelete: Cascade, onUpdate: NoAction)
+  firms        firms      @relation(fields: [firm_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   identification_forms identification_forms[]
 
   @@index([tenant_id])
+  @@index([firm_id])
   @@schema("public")
 }
 
@@ -226,9 +233,11 @@ model contacts {
 // disposal_place_id, collector = the tenant itself (tenant_id; its permit is read
 // from businesses.permit_number / dangerous_waste_permit_number at render, chosen by
 // is_hazardous). Only data that lives on no other table is stored: waste
-// classification, the per-party kg + dates, and note. begin_end_location is derived
-// (firm.address - disposal_place.address) at render, not stored. waste_type/ewc_code
-// are validated against the TS unions in src/agent/wasteChapters.ts before insert.
+// classification, the per-party kg + dates, and note. Section 7's begin/end destination
+// is derived at render from the two party NAMES (firm.name – disposal_place.name), and
+// the handover town comes from firms.city — none of the three are stored here.
+// waste_type/ewc_code are validated by the Pydantic TransportFormRequest gate, which
+// reads the same code maps generated from src/agent/wasteChapters.ts.
 model transport_forms {
   id                String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id         String @db.Uuid
@@ -240,15 +249,32 @@ model transport_forms {
   is_hazardous Boolean
   ewc_code     String
 
-  // Per-party weights and dates (form data, not derivable from any table)
+  // Per-party weights and dates (form data, not derivable from any table).
+  // Three weights, two dates — matching the template's boxes: waste_owner_total_kg is
+  // section 3's declared quantity, collector_total_kg + collector_date are the shared
+  // section 4/5 handover pair (one event, recorded by both sides), and end_owner_* is
+  // section 6's receipt at the disposal place.
   waste_owner_total_kg Decimal  @db.Decimal(12, 2)
-  waste_owner_date     DateTime @db.Date
   collector_total_kg   Decimal  @db.Decimal(12, 2)
   collector_date       DateTime @db.Date
   end_owner_total_kg   Decimal  @db.Decimal(12, 2)
   end_owner_date       DateTime @db.Date
 
   note String?
+
+  // Generated-document tracking, treated like invoices. storagePath is unique so a
+  // regenerated form (same id) overwrites its file rather than duplicating a path.
+  storagePath String? @unique
+  status      String  @default("draft")
+  title       String?
+  template_id String? @db.Uuid
+
+  // Call-origin tracking, same as invoices and identification_forms: a form generated
+  // over a Twilio call has no browser to download it, so origin='call' +
+  // downloaded_at=null surfaces it in the dashboard's pending-call-forms card until the
+  // owner downloads it.
+  origin        String    @default("manual")
+  downloaded_at DateTime? @db.Timestamptz(6)
 
   created_at      DateTime        @default(now()) @db.Timestamptz(6)
   firms           firms           @relation(fields: [firm_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -286,6 +312,19 @@ model identification_forms {
   waste_operation_code String
   place                String
   date                 DateTime @db.Date
+
+  // Generated-document tracking, treated like invoices. storagePath is unique so a
+  // regenerated form (same id) overwrites its file rather than duplicating a path.
+  storagePath String? @unique
+  status      String  @default("draft")
+  title       String?
+  template_id String? @db.Uuid
+
+  // Call-origin tracking, same as invoices: a form generated over a Twilio call has no
+  // browser to download it, so origin='call' + downloaded_at=null surfaces it in the
+  // dashboard's pending-call-forms card until the owner downloads it.
+  origin        String    @default("manual")
+  downloaded_at DateTime? @db.Timestamptz(6)
 
   created_at DateTime   @default(now()) @db.Timestamptz(6)
   firms      firms      @relation(fields: [firm_id], references: [id], onDelete: Cascade, onUpdate: NoAction)

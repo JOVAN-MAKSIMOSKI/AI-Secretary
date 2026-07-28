@@ -1,20 +1,32 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  confirmCallIdentificationFormsDownloaded,
   confirmCallInvoicesDownloaded,
+  confirmCallTransportFormsDownloaded,
+  createIdentificationFormDocument,
+  createTransportFormDocument,
   createInvoiceDocument,
+  downloadCallIdentificationFormsZip,
   downloadCallInvoicesZip,
+  downloadCallTransportFormsZip,
   extractDashboardMessage,
   getCachedTasks,
   getGmailInboxStats,
+  getPendingCallIdentificationForms,
   getPendingCallInvoices,
+  getPendingCallTransportForms,
   listCalendarEvents,
   listTasks,
   type CalendarEventResponse,
   type DashboardResolveAndRunResponse,
   type ExtractedInvoiceFromMessage,
+  type IdentificationFormDocumentRequest,
+  type TransportFormDocumentRequest,
   type InvoiceDocumentRequest,
+  type PendingIdentificationForm,
   type PendingInvoice,
+  type PendingTransportForm,
 } from "../../connection/supabase-client";
 import { useAppContextStore } from "../../store/app-context";
 import { useDashboardChat } from "../../hooks/useAgent";
@@ -263,6 +275,165 @@ function buildInvoicePayloadFromExtraction(
   return { payload };
 }
 
+// Maps the identification-form extraction output to the render-route payload. The extract
+// step already resolves firm_id/contact_id and derives ewc_code/is_hazardous; this only
+// checks those required fields survived (a firm or contact that didn't match by name is
+// absent) and reshapes what's present. Returns an error listing the missing fields so the
+// chat can say why it can't generate yet, rather than posting a payload the server rejects.
+function buildIdentificationFormPayload(
+  extracted: Record<string, unknown>
+): { payload: IdentificationFormDocumentRequest | null; error: string | null } {
+  const asString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
+  const asNumber = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+  const firmId = asString(extracted.firm_id);
+  const contactId = asString(extracted.contact_id);
+  const firmName = asString(extracted.firm_name);
+  const wasteLocation = asString(extracted.waste_location);
+  const wasteType = asString(extracted.waste_type);
+  const ewcCode = asString(extracted.ewc_code);
+  const packingMethod = asString(extracted.packing_method);
+  const wasteOrigin = asString(extracted.waste_origin);
+  const wasteOperationCode = asString(extracted.waste_operation_code);
+  const place = asString(extracted.place);
+  const date = asString(extracted.date);
+  const totalWeightKg = asNumber(extracted.total_weight_kg);
+  const isHazardous = typeof extracted.is_hazardous === "boolean" ? extracted.is_hazardous : undefined;
+
+  // Human-readable names for the fields most likely to be missing, so the message is
+  // actionable (e.g. an unmatched firm/contact name).
+  const missing: string[] = [];
+  if (!firmId || !firmName) missing.push("firm (name did not match a saved firm)");
+  if (!contactId) missing.push("responsible person (name did not match a contact of that firm)");
+  if (!wasteLocation) missing.push("waste location");
+  if (!wasteType || !ewcCode || isHazardous === undefined) missing.push("waste description / code");
+  if (!packingMethod) missing.push("packing method");
+  if (totalWeightKg === undefined) missing.push("total weight");
+  if (!wasteOrigin) missing.push("waste origin");
+  if (!wasteOperationCode) missing.push("operation code");
+  if (!place) missing.push("place");
+  if (!date) missing.push("date");
+
+  if (
+    missing.length > 0 ||
+    !firmId ||
+    !contactId ||
+    !firmName ||
+    !wasteLocation ||
+    !wasteType ||
+    !ewcCode ||
+    isHazardous === undefined ||
+    !packingMethod ||
+    totalWeightKg === undefined ||
+    !wasteOrigin ||
+    !wasteOperationCode ||
+    !place ||
+    !date
+  ) {
+    return {
+      payload: null,
+      error: `I could not generate the form yet — missing or unresolved: ${missing.join(", ")}.`,
+    };
+  }
+
+  return {
+    payload: {
+      firm_id: firmId,
+      contact_id: contactId,
+      firm_name: firmName,
+      waste_location: wasteLocation,
+      is_hazardous: isHazardous,
+      waste_type: wasteType,
+      ewc_code: ewcCode,
+      packing_method: packingMethod,
+      total_weight_kg: totalWeightKg,
+      waste_origin: wasteOrigin,
+      waste_operation_code: wasteOperationCode,
+      place,
+      date,
+    },
+    error: null,
+  };
+}
+
+function buildTransportFormPayload(
+  extracted: Record<string, unknown>
+): { payload: TransportFormDocumentRequest | null; error: string | null } {
+  const asString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
+  const asNumber = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+  const firmId = asString(extracted.firm_id);
+  const disposalPlaceId = asString(extracted.disposal_place_id);
+  const firmName = asString(extracted.firm_name);
+  const disposalPlaceName = asString(extracted.disposal_place_name);
+  const wasteType = asString(extracted.waste_type);
+  const ewcCode = asString(extracted.ewc_code);
+  const collectorDate = asString(extracted.collector_date);
+  const endOwnerDate = asString(extracted.end_owner_date);
+  const wasteOwnerTotalKg = asNumber(extracted.waste_owner_total_kg);
+  const collectorTotalKg = asNumber(extracted.collector_total_kg);
+  const endOwnerTotalKg = asNumber(extracted.end_owner_total_kg);
+  const isHazardous = typeof extracted.is_hazardous === "boolean" ? extracted.is_hazardous : undefined;
+  const note = asString(extracted.note);
+
+  // Human-readable names for the fields most likely to be missing, so the message is
+  // actionable (e.g. an unmatched firm or disposal-place name).
+  const missing: string[] = [];
+  if (!firmId || !firmName) missing.push("waste owner (name did not match a saved firm)");
+  if (!disposalPlaceId || !disposalPlaceName)
+    missing.push("end owner (name did not match a saved disposal place)");
+  if (!wasteType || !ewcCode || isHazardous === undefined) missing.push("waste description / code");
+  if (wasteOwnerTotalKg === undefined) missing.push("total quantity of waste");
+  if (collectorTotalKg === undefined) missing.push("quantity collected");
+  if (!collectorDate) missing.push("date of handover");
+  if (endOwnerTotalKg === undefined) missing.push("quantity received at the disposal place");
+  if (!endOwnerDate) missing.push("date received at the disposal place");
+
+  if (
+    missing.length > 0 ||
+    !firmId ||
+    !disposalPlaceId ||
+    !firmName ||
+    !disposalPlaceName ||
+    !wasteType ||
+    !ewcCode ||
+    isHazardous === undefined ||
+    wasteOwnerTotalKg === undefined ||
+    collectorTotalKg === undefined ||
+    !collectorDate ||
+    endOwnerTotalKg === undefined ||
+    !endOwnerDate
+  ) {
+    return {
+      payload: null,
+      error: `I could not generate the transport form yet — missing or unresolved: ${missing.join(", ")}.`,
+    };
+  }
+
+  return {
+    payload: {
+      firm_id: firmId,
+      disposal_place_id: disposalPlaceId,
+      firm_name: firmName,
+      disposal_place_name: disposalPlaceName,
+      waste_type: wasteType,
+      is_hazardous: isHazardous,
+      ewc_code: ewcCode,
+      waste_owner_total_kg: wasteOwnerTotalKg,
+      collector_total_kg: collectorTotalKg,
+      collector_date: collectorDate,
+      end_owner_total_kg: endOwnerTotalKg,
+      end_owner_date: endOwnerDate,
+      note: note ?? null,
+    },
+    error: null,
+  };
+}
+
 function formatNonInvoiceChainResponse(response: DashboardResolveAndRunResponse): string {
   const extracted = response.result?.extracted ?? {};
   const prettyExtracted = JSON.stringify(extracted, null, 2);
@@ -282,6 +453,22 @@ function formatNonInvoiceChainResponse(response: DashboardResolveAndRunResponse)
   if (response.resolvedChainId === "offer_extraction") {
     return [
       "I detected an offer request and routed it to the offer extraction chain.",
+      "Extracted fields:",
+      prettyExtracted,
+    ].join("\n\n");
+  }
+
+  if (response.resolvedChainId === "identification_form_extraction") {
+    return [
+      "I detected a waste identification form request and extracted its fields.",
+      "Extracted fields:",
+      prettyExtracted,
+    ].join("\n\n");
+  }
+
+  if (response.resolvedChainId === "transport_form_extraction") {
+    return [
+      "I detected a waste transport form request and extracted its fields.",
       "Extracted fields:",
       prettyExtracted,
     ].join("\n\n");
@@ -317,6 +504,12 @@ export default function PortalDashboard() {
   const [pendingCallInvoices, setPendingCallInvoices] = useState<PendingInvoice[]>([]);
   const [pendingCallCount, setPendingCallCount] = useState(0);
   const [isDownloadingInvoices, setIsDownloadingInvoices] = useState(false);
+  const [pendingCallForms, setPendingCallForms] = useState<PendingIdentificationForm[]>([]);
+  const [pendingCallFormCount, setPendingCallFormCount] = useState(0);
+  const [isDownloadingForms, setIsDownloadingForms] = useState(false);
+  const [pendingCallTransportForms, setPendingCallTransportForms] = useState<PendingTransportForm[]>([]);
+  const [pendingCallTransportFormCount, setPendingCallTransportFormCount] = useState(0);
+  const [isDownloadingTransportForms, setIsDownloadingTransportForms] = useState(false);
 
   const sttMode = useAppContextStore((state) => state.sttMode);
 
@@ -370,6 +563,14 @@ export default function PortalDashboard() {
     getPendingCallInvoices()
       .then(({ count, invoices }) => { setPendingCallCount(count); setPendingCallInvoices(invoices); })
       .catch(() => { /* non-fatal */ });
+
+    getPendingCallIdentificationForms()
+      .then(({ count, forms }) => { setPendingCallFormCount(count); setPendingCallForms(forms); })
+      .catch(() => { /* non-fatal */ });
+
+    getPendingCallTransportForms()
+      .then(({ count, forms }) => { setPendingCallTransportFormCount(count); setPendingCallTransportForms(forms); })
+      .catch(() => { /* non-fatal */ });
   }, []);
 
   useEffect(() => {
@@ -408,6 +609,65 @@ export default function PortalDashboard() {
     try {
       const resolveResponse = await extractDashboardMessage(content, abortController.signal);
       const extracted = (resolveResponse.result?.extracted ?? {}) as ExtractedInvoiceFromMessage;
+
+      // Identification form: auto-generate the document from the resolved fields. The
+      // extract step already resolved the parties, so on success we render immediately
+      // and hand back a download link — no separate confirm step.
+      if (resolveResponse.resolvedChainId === "identification_form_extraction") {
+        const rawExtracted = (resolveResponse.result?.extracted ?? {}) as Record<string, unknown>;
+        const { payload: idfPayload, error: idfError } = buildIdentificationFormPayload(rawExtracted);
+
+        if (!idfPayload) {
+          addMessage({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            role: "assistant",
+            content: idfError ?? "I extracted the fields but could not generate the form yet.",
+            createdAt: new Date().toISOString(),
+          });
+          return;
+        }
+
+        const result = await createIdentificationFormDocument(idfPayload);
+        const downloadUrl = URL.createObjectURL(result.blob);
+        addMessage({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: "assistant",
+          content: "Identification form is ready. Use the link below to download it.",
+          createdAt: new Date().toISOString(),
+          downloadUrl,
+          downloadLabel: result.filename,
+        });
+        return;
+      }
+
+      // Transport form: same auto-generate shape as the identification form above —
+      // the extract step already resolved both parties, so render immediately.
+      if (resolveResponse.resolvedChainId === "transport_form_extraction") {
+        const rawExtracted = (resolveResponse.result?.extracted ?? {}) as Record<string, unknown>;
+        const { payload: tfPayload, error: tfError } = buildTransportFormPayload(rawExtracted);
+
+        if (!tfPayload) {
+          addMessage({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            role: "assistant",
+            content: tfError ?? "I extracted the fields but could not generate the form yet.",
+            createdAt: new Date().toISOString(),
+          });
+          return;
+        }
+
+        const result = await createTransportFormDocument(tfPayload);
+        const downloadUrl = URL.createObjectURL(result.blob);
+        addMessage({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: "assistant",
+          content: "Transport form is ready. Use the link below to download it.",
+          createdAt: new Date().toISOString(),
+          downloadUrl,
+          downloadLabel: result.filename,
+        });
+        return;
+      }
 
       if (resolveResponse.resolvedChainId !== "invoice_extraction") {
         addMessage({
@@ -501,6 +761,54 @@ export default function PortalDashboard() {
     }
   };
 
+  const handleDownloadCallForms = async () => {
+    if (isDownloadingForms || pendingCallFormCount === 0) return;
+    setIsDownloadingForms(true);
+    try {
+      const ids = pendingCallForms.map((form) => form.id);
+      const blob = await downloadCallIdentificationFormsZip();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "identification-forms.zip";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      await confirmCallIdentificationFormsDownloaded(ids);
+      setPendingCallFormCount(0);
+      setPendingCallForms([]);
+    } catch {
+      // non-fatal: user can retry
+    } finally {
+      setIsDownloadingForms(false);
+    }
+  };
+
+  const handleDownloadCallTransportForms = async () => {
+    if (isDownloadingTransportForms || pendingCallTransportFormCount === 0) return;
+    setIsDownloadingTransportForms(true);
+    try {
+      const ids = pendingCallTransportForms.map((form) => form.id);
+      const blob = await downloadCallTransportFormsZip();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "transport-forms.zip";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      await confirmCallTransportFormsDownloaded(ids);
+      setPendingCallTransportFormCount(0);
+      setPendingCallTransportForms([]);
+    } catch {
+      // non-fatal: user can retry
+    } finally {
+      setIsDownloadingTransportForms(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-[var(--brand-surface)] md:h-full md:min-h-0">
       {/* Metric cards strip */}
@@ -510,7 +818,9 @@ export default function PortalDashboard() {
             <p className="text-xs font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Overview</p>
             <p className="text-[11px] text-[var(--brand-text-muted)]">{userEmail ?? "Unknown"}</p>
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {/* 1/2/3/6 all divide the six cards evenly, so no breakpoint leaves an orphan
+              tile on its own row. */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
 
             {/* Card 1 — Upcoming calendar events */}
             <div onClick={() => navigate("/portal/calendar")} className="flex cursor-pointer flex-col justify-between rounded-2xl border border-[var(--brand-border)] bg-[var(--brand-card)] p-5 shadow-sm shadow-black/[0.03] transition hover:border-[var(--brand-teal)] hover:shadow-md hover:shadow-black/[0.06]">
@@ -633,6 +943,78 @@ export default function PortalDashboard() {
                 </div>
                 <p className="text-[10px] text-[var(--brand-text-muted)]">
                   {isDownloadingInvoices ? "Downloading…" : "Voice-generated · pending"}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 5 — Call identification forms ready to download */}
+            <div
+              onClick={handleDownloadCallForms}
+              className={`flex flex-col justify-between rounded-2xl border p-5 shadow-sm shadow-black/[0.03] transition ${
+                pendingCallFormCount > 0
+                  ? "cursor-pointer border-[var(--brand-teal)] bg-[var(--brand-card)] hover:shadow-md hover:shadow-black/[0.06]"
+                  : "border-[var(--brand-border)] bg-[var(--brand-card)] opacity-60"
+              }`}
+            >
+              <div>
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--brand-teal-soft)]">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M8 3h6l4 4v14H6V3z" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinejoin="round" />
+                    <path d="M14 3v4h4M9 13h6M9 17h6" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <p className="text-[11px] font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Call Forms</p>
+                <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--brand-ink)]">
+                  {isDownloadingForms ? "…" : pendingCallFormCount}
+                </p>
+                {pendingCallFormCount > 0 && (
+                  <p className="mt-1 text-[11px] text-[var(--brand-text-muted)]">Click to download ZIP</p>
+                )}
+              </div>
+              <div className="mt-5 flex items-center gap-2 border-t border-[var(--brand-border)] pt-3">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-teal)] text-[9px] font-bold text-white">
+                  {userInitial}
+                </div>
+                <p className="text-[10px] text-[var(--brand-text-muted)]">
+                  {isDownloadingForms ? "Downloading…" : "Voice-generated · pending"}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 6 — Call transport forms ready to download */}
+            <div
+              onClick={handleDownloadCallTransportForms}
+              className={`flex flex-col justify-between rounded-2xl border p-5 shadow-sm shadow-black/[0.03] transition ${
+                pendingCallTransportFormCount > 0
+                  ? "cursor-pointer border-[var(--brand-teal)] bg-[var(--brand-card)] hover:shadow-md hover:shadow-black/[0.06]"
+                  : "border-[var(--brand-border)] bg-[var(--brand-card)] opacity-60"
+              }`}
+            >
+              <div>
+                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--brand-teal-soft)]">
+                  {/* Truck — the movement-between-parties signal that separates this form
+                      from the identification form's document icon above. */}
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M3 6h10v9H3z" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinejoin="round" />
+                    <path d="M13 9h4l3 3v3h-7z" stroke="var(--brand-teal)" strokeWidth="1.8" strokeLinejoin="round" />
+                    <circle cx="7" cy="18" r="1.8" stroke="var(--brand-teal)" strokeWidth="1.8" />
+                    <circle cx="17" cy="18" r="1.8" stroke="var(--brand-teal)" strokeWidth="1.8" />
+                  </svg>
+                </div>
+                <p className="text-[11px] font-medium uppercase tracking-widest text-[var(--brand-text-muted)]">Transport Forms</p>
+                <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--brand-ink)]">
+                  {isDownloadingTransportForms ? "…" : pendingCallTransportFormCount}
+                </p>
+                {pendingCallTransportFormCount > 0 && (
+                  <p className="mt-1 text-[11px] text-[var(--brand-text-muted)]">Click to download ZIP</p>
+                )}
+              </div>
+              <div className="mt-5 flex items-center gap-2 border-t border-[var(--brand-border)] pt-3">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand-teal)] text-[9px] font-bold text-white">
+                  {userInitial}
+                </div>
+                <p className="text-[10px] text-[var(--brand-text-muted)]">
+                  {isDownloadingTransportForms ? "Downloading…" : "Voice-generated · pending"}
                 </p>
               </div>
             </div>

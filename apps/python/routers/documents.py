@@ -13,12 +13,28 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status, UploadFil
 from fastapi.responses import StreamingResponse
 from postgrest.exceptions import APIError
 
-from models.documents import DocumentResponse, ExtractionRequest, ExtractionResponse, InvoiceRequest
+from models.documents import (
+    DocumentResponse,
+    ExtractionRequest,
+    ExtractionResponse,
+    IdentificationFormRequest,
+    InvoiceRequest,
+    TransportFormRequest,
+)
 from services.file_safety import UnsafeFileError, validate_ooxml
 from langchain import run_calendar_event_extraction, run_offer_extraction
+from services.identification_forms.extraction import (
+    extract_identification_form_fields_from_message,
+)
+from services.docx_render import render_docx_bytes
+from services.transport_forms.extraction import (
+    extract_transport_form_fields_from_message,
+)
 from services.invoices.excel import (
     extract_invoice_fields_from_message,
+    fetch_identification_form_template_payload,
     fetch_invoice_template_payload,
+    fetch_transport_form_template_payload,
     fetch_offer_template_payload,
     fetch_business_values,
     render_invoice_template_bytes,
@@ -27,8 +43,10 @@ from services.invoices.invoice_text import amount_to_macedonian_text
 from services.auth import get_current_user_id, get_current_user_id_or_service
 from services.storage import (
     supabase,
+    upload_identification_form_document,
     upload_invoice_document,
     upload_template_document,
+    upload_transport_form_document,
 )
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -213,6 +231,88 @@ def extract_offer_from_raw_message(
 
     logger.info(
         "Offer extraction payload user_id=%s extracted=%s",
+        current_user_id,
+        json.dumps(extracted, ensure_ascii=True),
+    )
+
+    return ExtractionResponse(extracted=extracted)
+
+
+@router.post(
+    "/extract-identification-form",
+    response_model=ExtractionResponse,
+    status_code=status.HTTP_200_OK,
+)
+def extract_identification_form_from_raw_message(
+    payload: ExtractionRequest,
+    current_user_id: str = Depends(get_current_user_id_or_service),
+) -> ExtractionResponse:
+    """Run the identification-form extraction chain against the raw message text.
+
+    Yields the free-text/numeric fields, a snapped waste_type with derived ewc_code +
+    is_hazardous, and resolved firm_id/contact_id (with firm address/permit and contact
+    phone/email) when the names match stored records — mirroring how invoice extraction
+    resolves firm_id. Unresolved names are returned as-is for the caller to reconcile.
+    """
+    try:
+        extracted = extract_identification_form_fields_from_message(
+            payload.message,
+            owner_auth_id=current_user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Identification-form extraction chain failed: {exc}",
+        ) from exc
+
+    logger.info(
+        "Identification-form extraction payload user_id=%s extracted=%s",
+        current_user_id,
+        json.dumps(extracted, ensure_ascii=True),
+    )
+
+    return ExtractionResponse(extracted=extracted)
+
+
+@router.post(
+    "/extract-transport-form",
+    response_model=ExtractionResponse,
+    status_code=status.HTTP_200_OK,
+)
+def extract_transport_form_from_raw_message(
+    payload: ExtractionRequest,
+    current_user_id: str = Depends(get_current_user_id_or_service),
+) -> ExtractionResponse:
+    """Run the transport-form extraction chain against the raw message text.
+
+    Yields the weights/dates, a snapped waste_type with derived ewc_code + is_hazardous,
+    and resolved firm_id/disposal_place_id (with firm address/city and disposal-place
+    address/town) when the names match stored records. Unresolved names are returned
+    as-is for the caller to reconcile.
+    """
+    try:
+        extracted = extract_transport_form_fields_from_message(
+            payload.message,
+            owner_auth_id=current_user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Transport-form extraction chain failed: {exc}",
+        ) from exc
+
+    logger.info(
+        "Transport-form extraction payload user_id=%s extracted=%s",
         current_user_id,
         json.dumps(extracted, ensure_ascii=True),
     )
@@ -494,6 +594,467 @@ def create_offer(
     )
 
 
+_DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+@router.post("/identification-form", status_code=status.HTTP_200_OK)
+def create_identification_form(
+    payload: IdentificationFormRequest,
+    current_user_id: str = Depends(get_current_user_id_or_service),
+    x_document_origin: str = Header(default="manual"),
+) -> StreamingResponse:
+    """Validate a confirmed identification-form payload, render the docx, persist the row,
+    upload to storage, and stream the file back.
+
+    This is the single door for both the web path (browser posts the confirmed draft here)
+    and the voice path (Twilio, via X-Document-Origin: call). Pydantic
+    (IdentificationFormRequest) is the authoritative gate; here we additionally re-verify
+    the parties against the DB and reject a form whose required legal boxes (firm address /
+    permit) would render blank. origin='call' rows surface in the dashboard's pending-call
+    card because a call has no browser to receive the streamed file.
+    """
+    owner_auth_id = str(UUID(current_user_id))
+    origin = x_document_origin if x_document_origin in ("manual", "call") else "manual"
+
+    # Verify tenant exists by canonical tenant identity (owner_auth_id).
+    business = (
+        supabase.table("businesses")
+        .select("owner_auth_id")
+        .eq("owner_auth_id", owner_auth_id)
+        .limit(1)
+        .execute()
+    )
+    if not business.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tenant '{owner_auth_id}' not found.",
+        )
+
+    # Re-load the firm and verify tenant ownership + name match + non-blank legal boxes.
+    firm_result = (
+        supabase.table("firms")
+        .select("id, name, address, permit_number")
+        .eq("id", payload.firm_id)
+        .eq("tenant_id", owner_auth_id)
+        .limit(1)
+        .execute()
+    )
+    if not firm_result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Firm not found for this tenant.",
+        )
+    firm_row = firm_result.data[0]
+
+    if str(firm_row.get("name") or "").strip() != payload.firm_name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="firm_name does not match the selected firm.",
+        )
+
+    firm_address = str(firm_row.get("address") or "").strip()
+    firm_permit = str(firm_row.get("permit_number") or "").strip()
+    # These are required boxes on the legal form. A firm missing either would render a
+    # blank field, so reject rather than produce an incomplete document.
+    if not firm_address:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The selected firm has no address; add one before generating the form.",
+        )
+    if not firm_permit:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The selected firm has no permit number; add one before generating the form.",
+        )
+
+    # Re-load the contact and verify it belongs to this tenant AND to the form's firm.
+    contact_result = (
+        supabase.table("contacts")
+        .select("id, name, phone_number, email, firm_id")
+        .eq("id", payload.contact_id)
+        .eq("tenant_id", owner_auth_id)
+        .limit(1)
+        .execute()
+    )
+    if not contact_result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contact not found for this tenant.",
+        )
+    contact_row = contact_result.data[0]
+    if str(contact_row.get("firm_id") or "") != payload.firm_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The selected contact does not belong to the selected firm.",
+        )
+
+    # Fetch the tenant's template before writing anything so a missing template fails fast.
+    try:
+        template_payload = fetch_identification_form_template_payload(owner_auth_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    form_id = str(uuid4())
+    storage_path = f"{owner_auth_id}/identification-forms/{form_id}.docx"
+    title = f"Identification form {payload.date.isoformat()} — {payload.firm_name}"
+
+    insert_data = {
+        "id": form_id,
+        "tenant_id": owner_auth_id,
+        "firm_id": payload.firm_id,
+        "contact_id": payload.contact_id,
+        "waste_location": payload.waste_location,
+        "is_hazardous": payload.is_hazardous,
+        "waste_type": payload.waste_type,
+        "ewc_code": payload.ewc_code,
+        "packing_method": payload.packing_method,
+        "total_weight_kg": str(payload.total_weight_kg),
+        "waste_origin": payload.waste_origin,
+        "waste_operation_code": payload.waste_operation_code,
+        "place": payload.place,
+        "date": payload.date.isoformat(),
+        "storagePath": storage_path,
+        "status": "draft",
+        "title": title,
+        "template_id": payload.template_id,
+        "origin": origin,
+    }
+
+    try:
+        supabase.table("identification_forms").insert(insert_data).execute()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to save identification form: {exc}",
+        ) from exc
+
+    # Values keyed to the template's placeholder tokens. Dot-path keys (firm.name, etc.)
+    # match the {{firm.name}} style tokens in IdentificationFormTemplate.tokenized.docx.
+    render_values = {
+        "place": payload.place,
+        "date": payload.date.isoformat(),
+        "firm": {
+            "name": payload.firm_name,
+            "permit": firm_permit,
+            "address": firm_address,
+        },
+        "wasteLocation": payload.waste_location,
+        "contact": {
+            "name": contact_row.get("name"),
+            "phoneNumber": contact_row.get("phone_number"),
+            "email": contact_row.get("email"),
+        },
+        "wasteDescription": payload.waste_type,
+        "wasteCode": payload.ewc_code,
+        "wasteMethodofPacking": payload.packing_method,
+        "TotalWasteWeight": str(payload.total_weight_kg),
+        "wasteOrigin": payload.waste_origin,
+        "wasteOperationsCode": payload.waste_operation_code,
+    }
+
+    try:
+        rendered_bytes = render_docx_bytes(
+            template_payload["template_bytes"],
+            render_values,
+        )
+    except Exception as exc:
+        # Roll back the row we just inserted so it does not linger pointing at a file that
+        # was never produced.
+        _delete_identification_form_row(form_id, owner_auth_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to render identification form: {exc}",
+        ) from exc
+
+    try:
+        upload_identification_form_document(owner_auth_id, form_id, rendered_bytes)
+    except Exception as exc:
+        _delete_identification_form_row(form_id, owner_auth_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Identification form {form_id} was generated but could not be saved to storage.",
+        ) from exc
+
+    logger.info(
+        "Identification form generated tenant=%s form_id=%s firm_id=%s",
+        owner_auth_id,
+        form_id,
+        payload.firm_id,
+    )
+
+    filename = f"{template_payload['template_name']}.docx"
+    return StreamingResponse(
+        BytesIO(rendered_bytes),
+        media_type=_DOCX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _delete_identification_form_row(form_id: str, tenant_id: str) -> None:
+    """Best-effort rollback of an identification-form row after a later step fails."""
+    try:
+        (
+            supabase.table("identification_forms")
+            .delete()
+            .eq("id", form_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+    except Exception:
+        logger.exception(
+            "Failed to roll back identification-form row %s after a downstream failure",
+            form_id,
+        )
+
+
+@router.post("/transport-form", status_code=status.HTTP_200_OK)
+def create_transport_form(
+    payload: TransportFormRequest,
+    current_user_id: str = Depends(get_current_user_id_or_service),
+    x_document_origin: str = Header(default="manual"),
+) -> StreamingResponse:
+    """Validate a confirmed transport-form payload, render the docx, persist the row,
+    upload to storage, and stream the file back.
+
+    The single door for both the web path (browser posts the confirmed draft here) and the
+    voice path (Twilio, via X-Document-Origin: call). Pydantic (TransportFormRequest) is
+    the authoritative gate; here we additionally re-verify both parties against the DB and
+    reject a form whose required legal boxes would render blank. The collector is always
+    the tenant itself — never chat-supplied — so its permit number is read from businesses
+    and picked by is_hazardous. origin='call' rows surface in the dashboard's pending-call
+    card because a call has no browser to receive the streamed file.
+    """
+    owner_auth_id = str(UUID(current_user_id))
+    origin = x_document_origin if x_document_origin in ("manual", "call") else "manual"
+
+    # Verify tenant exists and read the collector's permit numbers in one go: the
+    # collector on this manifest is always the tenant.
+    business = (
+        supabase.table("businesses")
+        .select("owner_auth_id, permit_number, dangerous_waste_permit_number")
+        .eq("owner_auth_id", owner_auth_id)
+        .limit(1)
+        .execute()
+    )
+    if not business.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tenant '{owner_auth_id}' not found.",
+        )
+    business_row = business.data[0]
+
+    # Hazardous waste must be carried under the dangerous-waste permit; ordinary waste
+    # under the standard one. Rejecting a blank permit beats rendering an empty legal box.
+    if payload.is_hazardous:
+        collector_permit = str(business_row.get("dangerous_waste_permit_number") or "").strip()
+        missing_permit_detail = (
+            "This waste is hazardous but your business has no dangerous-waste permit "
+            "number; add one in Settings before generating the form."
+        )
+    else:
+        collector_permit = str(business_row.get("permit_number") or "").strip()
+        missing_permit_detail = (
+            "Your business has no waste permit number; add one in Settings before "
+            "generating the form."
+        )
+    if not collector_permit:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=missing_permit_detail,
+        )
+
+    # Re-load the firm (waste owner) and verify tenant ownership + name match + non-blank
+    # legal boxes. city renders as the handover town ("Во …") shared by sections 4 and 5.
+    firm_result = (
+        supabase.table("firms")
+        .select("id, name, address, city")
+        .eq("id", payload.firm_id)
+        .eq("tenant_id", owner_auth_id)
+        .limit(1)
+        .execute()
+    )
+    if not firm_result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Firm not found for this tenant.",
+        )
+    firm_row = firm_result.data[0]
+
+    if str(firm_row.get("name") or "").strip() != payload.firm_name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="firm_name does not match the selected firm.",
+        )
+
+    firm_address = str(firm_row.get("address") or "").strip()
+    firm_city = str(firm_row.get("city") or "").strip()
+    if not firm_address:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The selected firm has no address; add one before generating the form.",
+        )
+    if not firm_city:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The selected firm has no city; add one before generating the form.",
+        )
+
+    # Re-load the disposal place (end owner) and verify tenant ownership + name match.
+    # Its address/place are NOT NULL in the schema, so they need no blank guard.
+    disposal_result = (
+        supabase.table("disposal_places")
+        .select("id, name, address, place")
+        .eq("id", payload.disposal_place_id)
+        .eq("tenant_id", owner_auth_id)
+        .limit(1)
+        .execute()
+    )
+    if not disposal_result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Disposal place not found for this tenant.",
+        )
+    disposal_row = disposal_result.data[0]
+
+    if str(disposal_row.get("name") or "").strip() != payload.disposal_place_name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="disposal_place_name does not match the selected disposal place.",
+        )
+
+    # Fetch the tenant's template before writing anything so a missing template fails fast.
+    try:
+        template_payload = fetch_transport_form_template_payload(owner_auth_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    form_id = str(uuid4())
+    storage_path = f"{owner_auth_id}/transport-forms/{form_id}.docx"
+    title = (
+        f"Transport form {payload.collector_date.isoformat()} — "
+        f"{payload.firm_name} → {payload.disposal_place_name}"
+    )
+
+    insert_data = {
+        "id": form_id,
+        "tenant_id": owner_auth_id,
+        "firm_id": payload.firm_id,
+        "disposal_place_id": payload.disposal_place_id,
+        "waste_type": payload.waste_type,
+        "is_hazardous": payload.is_hazardous,
+        "ewc_code": payload.ewc_code,
+        "waste_owner_total_kg": str(payload.waste_owner_total_kg),
+        "collector_total_kg": str(payload.collector_total_kg),
+        "collector_date": payload.collector_date.isoformat(),
+        "end_owner_total_kg": str(payload.end_owner_total_kg),
+        "end_owner_date": payload.end_owner_date.isoformat(),
+        "note": payload.note,
+        "storagePath": storage_path,
+        "status": "draft",
+        "title": title,
+        "template_id": payload.template_id,
+        "origin": origin,
+    }
+
+    try:
+        supabase.table("transport_forms").insert(insert_data).execute()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to save transport form: {exc}",
+        ) from exc
+
+    # Values keyed to the template's placeholder tokens (TransportFormTemplate.tokenized
+    # .docx). Sections 4 and 5 share wasteCollected/wasteCollectedDate — they are the two
+    # sides of one handover — and section 7's begin/end destination is derived here from
+    # the two party names rather than being stored. 'tennant' keeps the template's own
+    # spelling; the mapping layer absorbs it exactly as the invoice route does.
+    render_values = {
+        "wasteDescription": payload.waste_type,
+        "wasteCode": payload.ewc_code,
+        "TotalWasteWeight": str(payload.waste_owner_total_kg),
+        "firm": {
+            "name": payload.firm_name,
+            "address": firm_address,
+        },
+        "wasteCollected": str(payload.collector_total_kg),
+        "wasteCollectedDate": payload.collector_date.isoformat(),
+        "wasteCollectedPlace": firm_city,
+        "tennant": {
+            "permitNumber": collector_permit,
+        },
+        "disposalPlace": {
+            "name": payload.disposal_place_name,
+            "address": disposal_row.get("address"),
+            "location": disposal_row.get("place"),
+        },
+        "totalWasteWeightDisposed": str(payload.end_owner_total_kg),
+        "dateOfDisposal": payload.end_owner_date.isoformat(),
+        "note": payload.note or "",
+    }
+
+    try:
+        rendered_bytes = render_docx_bytes(
+            template_payload["template_bytes"],
+            render_values,
+        )
+    except Exception as exc:
+        # Roll back the row we just inserted so it does not linger pointing at a file that
+        # was never produced.
+        _delete_transport_form_row(form_id, owner_auth_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to render transport form: {exc}",
+        ) from exc
+
+    try:
+        upload_transport_form_document(owner_auth_id, form_id, rendered_bytes)
+    except Exception as exc:
+        _delete_transport_form_row(form_id, owner_auth_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Transport form {form_id} was generated but could not be saved to storage.",
+        ) from exc
+
+    logger.info(
+        "Transport form generated tenant=%s form_id=%s firm_id=%s disposal_place_id=%s",
+        owner_auth_id,
+        form_id,
+        payload.firm_id,
+        payload.disposal_place_id,
+    )
+
+    filename = f"{template_payload['template_name']}.docx"
+    return StreamingResponse(
+        BytesIO(rendered_bytes),
+        media_type=_DOCX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _delete_transport_form_row(form_id: str, tenant_id: str) -> None:
+    """Best-effort rollback of a transport-form row after a later step fails."""
+    try:
+        (
+            supabase.table("transport_forms")
+            .delete()
+            .eq("id", form_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+    except Exception:
+        logger.exception(
+            "Failed to roll back transport-form row %s after a downstream failure",
+            form_id,
+        )
+
+
 @router.post("/template", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
 def create_template(
     name: str = Form(...),
@@ -505,15 +1066,17 @@ def create_template(
     """Upload and save a document template (invoice, offer, or a waste form)."""
     tenant_id_str = str(UUID(current_user_id))
 
-    # Each doc_type maps to its own per-tenant template table. The two waste forms are
-    # Excel-only (no Word variant), so they are constrained to .xlsx below.
+    # Each doc_type maps to its own per-tenant template table. Both waste forms are
+    # authored in Word and rendered by the shared run-level docx renderer, so they are
+    # docx-only; the invoice template is the openpyxl path and stays xlsx-only. The offer
+    # template accepts either.
     template_table_by_doc_type = {
         "invoice": "templatesInvoice",
         "offer": "templatesOffer",
         "transport_form": "templatesTransportForm",
         "identification_form": "templatesIdentificationForm",
     }
-    xlsx_only_doc_types = {"transport_form", "identification_form"}
+    docx_only_doc_types = {"transport_form", "identification_form"}
 
     # Validate doc_type and extension
     if doc_type not in template_table_by_doc_type:
@@ -531,10 +1094,10 @@ def create_template(
             detail="extension must be 'xlsx' or 'docx'.",
         )
 
-    if doc_type in xlsx_only_doc_types and normalized_extension != "xlsx":
+    if doc_type in docx_only_doc_types and normalized_extension != "docx":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"doc_type '{doc_type}' only supports the 'xlsx' extension.",
+            detail=f"doc_type '{doc_type}' only supports the 'docx' extension.",
         )
 
     # Verify tenant exists by canonical tenant identity (owner_auth_id).

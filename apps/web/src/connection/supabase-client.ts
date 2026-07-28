@@ -110,8 +110,10 @@ export type DisposalPlaceResponse = {
   created_at: string | null;
 };
 
-// Contacts — standalone individuals (address book). All four fields required.
+// Contacts — a responsible person belonging to exactly one firm. firm_id and all four
+// detail fields are required.
 export type ContactCreateRequest = {
+  firm_id: string;
   name: string;
   email: string;
   phone_number: string;
@@ -123,6 +125,7 @@ export type ContactUpdateRequest = ContactCreateRequest;
 export type ContactResponse = {
   id: string;
   tenant_id: string;
+  firm_id: string;
   name: string;
   email: string;
   phone_number: string;
@@ -147,6 +150,47 @@ export type InvoiceDocumentRequest = {
   price_before_tax: number;
   price_after_tax: number;
   price_after_tax_text?: string;
+  template_id?: string | null;
+};
+
+// Identification form — the confirmed draft posted to the render route. Parties arrive
+// as resolved ids (firm_id/contact_id); firm_name is echoed for the server-side match.
+// ewc_code/is_hazardous/waste_type come from the extraction step already snapped.
+export type IdentificationFormDocumentRequest = {
+  firm_id: string;
+  contact_id: string;
+  firm_name: string;
+  waste_location: string;
+  is_hazardous: boolean;
+  waste_type: string;
+  ewc_code: string;
+  packing_method: string;
+  total_weight_kg: number;
+  waste_origin: string;
+  waste_operation_code: string;
+  place: string;
+  date: string;
+  template_id?: string | null;
+};
+
+// Mirrors the Pydantic TransportFormRequest gate. The collector is the tenant itself, so
+// it is never sent — its permit is read from the business record at render, picked by
+// is_hazardous. Three weights but two dates: sections 4 and 5 of the form record the two
+// sides of a single handover, so they share one date.
+export type TransportFormDocumentRequest = {
+  firm_id: string;
+  disposal_place_id: string;
+  firm_name: string;
+  disposal_place_name: string;
+  waste_type: string;
+  is_hazardous: boolean;
+  ewc_code: string;
+  waste_owner_total_kg: number;
+  collector_total_kg: number;
+  collector_date: string;
+  end_owner_total_kg: number;
+  end_owner_date: string;
+  note?: string | null;
   template_id?: string | null;
 };
 
@@ -987,6 +1031,95 @@ export async function confirmCallInvoicesDownloaded(ids: string[]): Promise<void
   if (!response.ok) throw new Error('Failed to confirm invoice downloads.');
 }
 
+// Identification forms generated over a Twilio call — same pending-call-download pattern
+// as invoices above (origin='call', not yet downloaded).
+export type PendingIdentificationForm = {
+  id: string;
+  title: string | null;
+  created_at: string;
+};
+
+export async function getPendingCallIdentificationForms(): Promise<{
+  count: number;
+  forms: PendingIdentificationForm[];
+}> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(
+    `${agentApiBaseUrl}/identification-forms/pending-call-downloads`,
+    { headers }
+  );
+  if (!response.ok) throw new Error('Failed to fetch pending call forms.');
+  return response.json() as Promise<{ count: number; forms: PendingIdentificationForm[] }>;
+}
+
+export async function downloadCallIdentificationFormsZip(): Promise<Blob> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/identification-forms/call-downloads/zip`, {
+    method: 'POST',
+    headers,
+  });
+  if (!response.ok) throw new Error('Failed to download identification-form ZIP.');
+  return response.blob();
+}
+
+export async function confirmCallIdentificationFormsDownloaded(ids: string[]): Promise<void> {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const response = await fetchWithTimeout(
+    `${agentApiBaseUrl}/identification-forms/call-downloads/confirm`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ids }),
+    }
+  );
+  if (!response.ok) throw new Error('Failed to confirm form downloads.');
+}
+
+// Transport-form call downloads — same trio against the transport_forms table. The row
+// shape matches PendingIdentificationForm today but is kept as its own type so the two
+// cards can diverge without one silently changing the other.
+export type PendingTransportForm = {
+  id: string;
+  title: string | null;
+  created_at: string;
+};
+
+export async function getPendingCallTransportForms(): Promise<{
+  count: number;
+  forms: PendingTransportForm[];
+}> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(
+    `${agentApiBaseUrl}/transport-forms/pending-call-downloads`,
+    { headers }
+  );
+  if (!response.ok) throw new Error('Failed to fetch pending call transport forms.');
+  return response.json() as Promise<{ count: number; forms: PendingTransportForm[] }>;
+}
+
+export async function downloadCallTransportFormsZip(): Promise<Blob> {
+  const headers = await getAuthHeaders();
+  const response = await fetchWithTimeout(`${agentApiBaseUrl}/transport-forms/call-downloads/zip`, {
+    method: 'POST',
+    headers,
+  });
+  if (!response.ok) throw new Error('Failed to download transport-form ZIP.');
+  return response.blob();
+}
+
+export async function confirmCallTransportFormsDownloaded(ids: string[]): Promise<void> {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const response = await fetchWithTimeout(
+    `${agentApiBaseUrl}/transport-forms/call-downloads/confirm`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ids }),
+    }
+  );
+  if (!response.ok) throw new Error('Failed to confirm transport-form downloads.');
+}
+
 export async function createInvoiceDocument(payload: InvoiceDocumentRequest): Promise<{
   blob: Blob;
   filename: string;
@@ -1017,6 +1150,82 @@ export async function createInvoiceDocument(payload: InvoiceDocumentRequest): Pr
   const contentDisposition = response.headers.get("Content-Disposition") ?? "";
   const match = /filename="?([^\"]+)"?/i.exec(contentDisposition);
   const filename = match?.[1] ?? "invoice.xlsx";
+
+  return {
+    blob: await response.blob(),
+    filename,
+  };
+}
+
+// Posts the confirmed identification-form draft straight to the Python render route —
+// same browser→python pattern as createInvoiceDocument (the agent is not in this call).
+export async function createIdentificationFormDocument(
+  payload: IdentificationFormDocumentRequest
+): Promise<{ blob: Blob; filename: string }> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/documents/identification-form`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let detail = "Failed to generate identification form.";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        detail = data.detail;
+      }
+    } catch {
+      // Keep fallback error message when response body is not JSON.
+    }
+    throw new Error(detail);
+  }
+
+  const contentDisposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^\"]+)"?/i.exec(contentDisposition);
+  const filename = match?.[1] ?? "identification-form.docx";
+
+  return {
+    blob: await response.blob(),
+    filename,
+  };
+}
+
+// Posts the confirmed transport-form draft straight to the Python render route —
+// same browser→python pattern as createInvoiceDocument (the agent is not in this call).
+export async function createTransportFormDocument(
+  payload: TransportFormDocumentRequest
+): Promise<{ blob: Blob; filename: string }> {
+  const headers = await getAuthHeaders({
+    "Content-Type": "application/json",
+  });
+
+  const response = await fetchWithTimeout(`${pythonApiBaseUrl}/documents/transport-form`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let detail = "Failed to generate transport form.";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        detail = data.detail;
+      }
+    } catch {
+      // Keep fallback error message when response body is not JSON.
+    }
+    throw new Error(detail);
+  }
+
+  const contentDisposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^\"]+)"?/i.exec(contentDisposition);
+  const filename = match?.[1] ?? "transport-form.docx";
 
   return {
     blob: await response.blob(),
@@ -1181,10 +1390,15 @@ export type ExtractedInvoiceFromMessage = {
   };
 };
 
+// The chains the dashboard chat can land on. Narrower than the agent's full ChainId
+// union — read-only query chains (task_query, calendar_query, firm_lookup, waste_law_query)
+// answer in prose and never reach the extraction branches below.
 export type ResolvedDashboardChainId =
   | "invoice_extraction"
   | "offer_extraction"
-  | "calendar_event_extraction";
+  | "calendar_event_extraction"
+  | "identification_form_extraction"
+  | "transport_form_extraction";
 
 export type DashboardResolveAndRunResponse = {
   tenantId: string;

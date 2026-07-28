@@ -97,9 +97,11 @@ export const sendSmtpTestEmail = sendGmailTestEmail;
 export async function getDocumentBuffer(
   tenantId: string,
   documentId: string,
-  documentType: 'invoice' | 'offer'
+  documentType: 'invoice' | 'offer' | 'identification-form' | 'transport-form'
 ): Promise<{ buffer: Buffer; filename: string }> {
   const ext = documentType === 'invoice' ? 'xlsx' : 'docx';
+  // Storage folders are the pluralised type: invoices/, offers/, identification-forms/,
+  // transport-forms/.
   const path = `${tenantId}/${documentType}s/${documentId}.${ext}`;
 
   const { data, error } = await supabase.storage.from('documents').download(path);

@@ -433,8 +433,10 @@ banner: "Set your business waste profile for more specific legal advice →" lin
   Prints new entries for manual review — does NOT auto-ingest. You review, download the PDF,
   then run `scripts/ingest.py` on the affected articles only.
 
-- **Selective re-ingestion** — use the `--append` flag (already in `ingest.py`) to add new
-  article versions without touching existing chunks. No full re-index needed.
+- **Selective re-ingestion** — already the default in `ingest.py` as of 2026-07-28: point
+  ids are content-addressed, so re-running it on individual files upserts those chunks and
+  leaves every other document untouched. No flag, no full re-index. (The old `--append`
+  flag is gone; the destructive path is now the opt-in `--recreate`, which snapshots first.)
 
 - **Add `--law-name` and `--valid-from` CLI flags** to `scripts/ingest.py` so every ingestion
   run is tagged with which law and which version it came from.

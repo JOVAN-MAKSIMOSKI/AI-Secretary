@@ -17,7 +17,9 @@ def _validate_email(value: str) -> str:
 
 
 class ContactCreateRequest(BaseModel):
-    # All four fields are required (NOT NULL columns on contacts).
+    # firm_id and the four detail fields are all required (NOT NULL columns). A contact
+    # belongs to exactly one firm; the router verifies the firm belongs to the tenant.
+    firm_id: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=254)
     phone_number: str = Field(min_length=1, max_length=30)
@@ -30,6 +32,8 @@ class ContactCreateRequest(BaseModel):
 
 
 class ContactUpdateRequest(BaseModel):
+    # firm_id is editable — a contact can be reassigned to another firm.
+    firm_id: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=254)
     phone_number: str = Field(min_length=1, max_length=30)
@@ -44,6 +48,7 @@ class ContactUpdateRequest(BaseModel):
 class ContactResponse(BaseModel):
     id: str
     tenant_id: str
+    firm_id: str
     name: str
     email: str
     phone_number: str

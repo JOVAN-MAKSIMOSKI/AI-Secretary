@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src",
     "type-check": "tsc --noEmit",
+    "gen:waste-reference": "tsx scripts/generateWasteReference.ts",
     "eval:coverage": "tsx src/evals/coverage.ts",
     "eval:offline": "tsx --test src/evals/offline.eval.ts src/evals/handlerLogic.eval.ts",
     "eval:routing": "tsx --test src/evals/routing.eval.ts"
