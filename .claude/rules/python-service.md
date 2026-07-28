@@ -267,6 +267,13 @@ uv run pytest evals/ -q   # paid/heavy evals: retrieval (needs Qdrant + e5 model
 
 - `tests/` — pure-function guards only. No Qdrant, no model load, no network. Keep it
   fast; it is the half that gates every push.
+- `tests/conftest.py` forces dummy `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` before
+  collection. `services/storage.py` builds its client at import time and raises without
+  them, and nearly every service module reaches it transitively (`firm_lookup` →
+  `storage`), so a test importing one dies during *collection* and takes the whole suite
+  with it. A local `.env` masks this — it only fails in CI. Do not remove the guard, and
+  never let a `tests/` case depend on a real Supabase project. `evals/eval_env.py` keeps
+  its own copy for the eval process, which does not load this conftest.
 - `evals/` holds two paid suites, each with its own self-skip so CI degrades rather than
   fails:
   - **retrieval** (`test_retrieval.py`) — the waste-law eval, scored as recall@k against

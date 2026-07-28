@@ -62,9 +62,12 @@ jobs:
         run: uv run python -m compileall -q main.py routers services models scripts
         working-directory: apps/python
 
-      # Gate A (python half) — prompt-injection guards for the waste-law RAG corpus.
-      # Pure functions: no Qdrant, no model load, no network, ~2s.
-      - name: Eval gate A — python RAG injection guards
+      # Gate A (python half) — the whole tests/ suite: RAG injection guards, invoice
+      # math, waste-form request models, lookups, renderers, and route logic.
+      # No Qdrant, no model load, no network, ~8s. Deliberately has no `env:` block:
+      # tests/conftest.py supplies dummy Supabase values so the import-time client in
+      # services/storage.py can be built without ever reaching a real project.
+      - name: Eval gate A — python offline guards
         run: uv run pytest -q
         working-directory: apps/python
 
