@@ -438,6 +438,15 @@ function formatNonInvoiceChainResponse(response: DashboardResolveAndRunResponse)
   const extracted = response.result?.extracted ?? {};
   const prettyExtracted = JSON.stringify(extracted, null, 2);
 
+  // General chat already returns finished prose — render it as-is rather than
+  // wrapping it in any "I routed your request..." framing.
+  if (response.resolvedChainId === "general_chat") {
+    const answer = response.result?.answer;
+    return typeof answer === "string" && answer.trim().length > 0
+      ? answer
+      : "I could not produce an answer for that. Please try rephrasing.";
+  }
+
   if (response.resolvedChainId === "calendar_event_extraction") {
     const success = response.result?.success === true;
     const message =
@@ -483,6 +492,11 @@ function formatNonInvoiceChainResponse(response: DashboardResolveAndRunResponse)
 
 
 const TOMORROW_END_OFFSET_MS = 2 * 24 * 60 * 60 * 1000;
+
+// Turns carried into general_chat for conversational follow-ups. Well under the
+// agent's 50-message cap, and bounded so a long session cannot grow the request
+// without limit.
+const CHAT_HISTORY_TURNS = 12;
 
 export default function PortalDashboard() {
   const navigate = useNavigate();
@@ -607,7 +621,14 @@ export default function PortalDashboard() {
     abortControllerRef.current = abortController;
 
     try {
-      const resolveResponse = await extractDashboardMessage(content, abortController.signal);
+      // `messages` is the pre-addMessage value in this closure, so it is exactly
+      // the prior conversation — the message being sent is not duplicated here.
+      const history = messages
+        .slice(-CHAT_HISTORY_TURNS)
+        .filter((entry) => entry.content.trim().length > 0)
+        .map((entry) => ({ role: entry.role, content: entry.content }));
+
+      const resolveResponse = await extractDashboardMessage(content, abortController.signal, history);
       const extracted = (resolveResponse.result?.extracted ?? {}) as ExtractedInvoiceFromMessage;
 
       // Identification form: auto-generate the document from the resolved fields. The

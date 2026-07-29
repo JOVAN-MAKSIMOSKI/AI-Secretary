@@ -2,6 +2,7 @@ import { getChainRegistry, type ChainId } from './nodes/chainRegistry.js';
 import { resolveChainWithLlm } from './nodes/llmResolver.js';
 import { runWasteLawChain } from './wasteLawChain.js';
 import { handleTaskQuery, handleCalendarQuery, handleFirmLookup } from './chainHandlers.js';
+import { runGeneralChat, type GeneralChatMessage } from './generalChatChain.js';
 import {
   addMinutesToLocalDateTime,
   buildLocalDateTime,
@@ -53,6 +54,9 @@ export async function runDirectResolverChain(input: {
   userAuthId: string;
   accessToken: string;
   message: string;
+  // Only general_chat consumes history today; the extraction chains are
+  // single-shot by design and ignore it.
+  history?: GeneralChatMessage[];
 }): Promise<DirectResolverResult> {
   const decision = await resolveChainWithLlm(input.message, getChainRegistry());
 
@@ -154,6 +158,16 @@ export async function runDirectResolverChain(input: {
       break;
     case 'firm_lookup':
       handlerResult = { ...(await handleFirmLookup(input.tenantId, input.message)) };
+      break;
+    case 'general_chat':
+      {
+        const chat = await runGeneralChat({
+          message: input.message,
+          history: input.history,
+          channel: 'web',
+        });
+        handlerResult = { success: true, answer: chat.answer, searched: chat.searched };
+      }
       break;
     default:
       throw new Error(`No direct handler available for chain '${decision.chainId}'.`);

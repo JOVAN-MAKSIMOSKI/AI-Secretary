@@ -9,7 +9,6 @@
 // The caller is the only one who can end the call; <Hangup> is never used.
 
 import type { Request, Response } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { resolveChainWithLlm } from '../agent/nodes/llmResolver.js';
@@ -20,6 +19,7 @@ import { calendarExtractionSchema } from '../agent/calendarTime.js';
 import { handleTaskQuery, handleCalendarQuery, handleFirmLookup } from '../agent/chainHandlers.js';
 import { speakTaskQuery, speakCalendarQuery, speakFirmLookup } from './voicePhrasing.js';
 import { runWasteLawChain } from '../agent/wasteLawChain.js';
+import { runGeneralChat } from '../agent/generalChatChain.js';
 import {
   getOrCreateCallState,
   getCallState,
@@ -37,7 +37,6 @@ import { decryptTwilioRecording, type TwilioEncryptionDetails } from './encrypti
 
 const PY_SERVICE_URL = process.env.PY_SERVICE_URL || 'http://127.0.0.1:8000';
 const CONFIDENCE_THRESHOLD = 0.7;
-const MAX_VOICE_TOKENS = 150;
 // Twilio <Pause> minimum is 1s. Caller waits up to this long between the background job
 // finishing and the result being played, so keep it tight.
 const POLL_PAUSE_SECONDS = 1;
@@ -56,10 +55,8 @@ const VOICE_ERROR = "Настана грешка. Ве молам обидете
 // Fixed confirmation for a successful booking, with its own follow-up prompt baked in.
 // Returned verbatim — the generic follow-up is not appended (see processRecording).
 const VOICE_BOOKING_SUCCESS = "Успешно извршена наредба. Како можам понатаму да ви помогнам?";
-const VOICE_SYSTEM_PROMPT =
-  'Ти си гласовна секретарка која зборува македонски. Одговарај со 1-2 кратки реченици, ' +
-  'без markdown, без листи и без специјални знаци. Твојот одговор ќе биде изговорен на глас ' +
-  'преку телефонски повик. Биди концизна и природна.';
+// The spoken-Macedonian system prompt that used to live here now sits in
+// agent/generalChatChain.ts, so the phone and dashboard share one definition.
 
 // const CHAIN_DESCRIPTIONS: Record<ChainId, string> = {
 //   invoice_extraction: 'prepare an invoice',
@@ -497,6 +494,12 @@ async function executeChain(
       }
     }
 
+    // Catch-all conversation, including questions that need a web lookup. Same
+    // shared chain the low-confidence fallback uses, so a caller gets an
+    // identical answer whether the router was confident or not.
+    case 'general_chat':
+      return generateConversationalReply(state, transcript);
+
     case 'calendar_event_extraction': {
       const extractionResult = await callPythonExtraction('/documents/extract-calendar', transcript, tenantId);
       const extracted = extractionResult.extracted;
@@ -536,23 +539,30 @@ async function executeChain(
   }
 }
 
-// Generates a short conversational reply using Claude Haiku for non-command requests.
-async function generateConversationalReply(state: CallState): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return "Извинете, не можам да одговорам во моментов.";
-
+// Short spoken reply for anything that is not a command. Delegates to the shared
+// general-chat chain so the phone and the dashboard answer with the same model,
+// prompt, and web-search behaviour — this used to be a voice-only Anthropic call
+// that had no web counterpart and was already drifting.
+// Reached two ways: routed here as `general_chat`, or as the low-confidence
+// fallback in processRecording.
+async function generateConversationalReply(state: CallState, transcript: string): Promise<string> {
   try {
-    const anthropic = new Anthropic({ apiKey });
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: MAX_VOICE_TOKENS,
-      system: [{ type: 'text', text: VOICE_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-      messages: state.conversationHistory,
+    // processRecording appends this turn's user message to conversationHistory
+    // before routing, so the last entry is `transcript` itself. runGeneralChat
+    // appends `message` on its own — passing the untrimmed array would show the
+    // model the same question twice.
+    const priorHistory = state.conversationHistory.slice(0, -1);
+    const { answer } = await runGeneralChat({
+      message: transcript,
+      history: priorHistory,
+      channel: 'voice',
     });
-    const block = response.content.find((b) => b.type === 'text');
-    return block?.type === 'text' ? block.text : VOICE_ERROR;
+    return answer;
   } catch (err) {
-    logger.error({ err }, 'Conversational reply generation failed');
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Conversational reply generation failed',
+    );
     return VOICE_ERROR;
   }
 }
@@ -731,7 +741,7 @@ async function processRecording(
             : `${resultText} Со што друго можам да ви помогнам?`;
       } else {
         // Low confidence — handle as general conversation.
-        responseText = await generateConversationalReply(state);
+        responseText = await generateConversationalReply(state, transcript);
       }
 
       // Append assistant turn.
