@@ -49,6 +49,14 @@ Every rule below serves one of these three.
 - Never call the Claude API from Python — only from TypeScript (`apps/agent`)
 - Never send an email or save a file without a human approval gate (`interrupt_before`)
 - Never skip system prompt caching — reduces cost by ~90%
+- The Haiku-only rule has exactly one carve-out: `generalChatChain.ts` runs OpenAI
+  `gpt-5-nano` for the `general_chat` catch-all (only an OpenAI credential exists, and
+  the hosted `web_search` tool has no GitHub Models equivalent). It is scoped in
+  `.claude/rules/agent-service.md`. Never widen it to another call site, and never read
+  it as permission to call an LLM from `apps/python` — that prohibition is unaffected.
+- Never let `general_chat` absorb a request another chain handles. It is a last resort,
+  enforced by `maxGeneralChatFalsePositives` in `src/evals/baseline.json`. If that gate
+  trips, tighten the chain description — raising the number hides lost functionality.
 
 ---
 

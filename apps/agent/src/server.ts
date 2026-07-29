@@ -56,10 +56,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_TITLE_LENGTH = 500;
 const MAX_NOTES_LENGTH = 5_000;
 const MAX_MESSAGE_LENGTH = 10_000;
-const MAX_LAW_CHAT_HISTORY_MESSAGES = 50;
+// Shared by the waste-law chat routes and /agent/resolve-and-run.
+const MAX_CHAT_HISTORY_MESSAGES = 50;
 // Matches the Python LawChatRequest ChatMessage content cap — anything longer
 // would 422 downstream, so truncate here instead of failing the request
-const MAX_LAW_CHAT_HISTORY_CONTENT_LENGTH = 8_000;
+const MAX_CHAT_HISTORY_CONTENT_LENGTH = 8_000;
 const AUDIO_MAX_SIZE_BYTES = 25 * 1024 * 1024;
 const ALLOWED_AUDIO_MIMES = new Set([
 	'audio/webm',
@@ -890,6 +891,13 @@ app.post(
 			return;
 		}
 
+		// Optional: only general_chat consumes it, but it is validated for every
+		// request so a malformed body is rejected before any chain runs.
+		const parsedHistory = parseChatHistory(req, res);
+		if (!parsedHistory) {
+			return;
+		}
+
 		const accessToken = parseBearerToken(req);
 		if (!accessToken) {
 			res.status(401).json({ error: 'Missing bearer token.' });
@@ -898,7 +906,13 @@ app.post(
 
 		try {
 			const tenantId = await getTenantForUser(userAuthId);
-			const result = await runDirectResolverChain({ tenantId, userAuthId, accessToken, message });
+			const result = await runDirectResolverChain({
+				tenantId,
+				userAuthId,
+				accessToken,
+				message,
+				history: parsedHistory.history,
+			});
 
 			res.json({
 				tenantId,
@@ -920,6 +934,36 @@ app.post(
 		}
 	},
 );
+
+// Conversation history is untrusted client input, so shape and size are checked
+// in one place and reused by every route that accepts it. Returns a wrapper
+// object rather than the array itself so an empty history stays distinguishable
+// from a rejected request. Writes the error response and returns null on reject.
+function parseChatHistory(
+	req: AuthenticatedRequest,
+	res: Response,
+): { history: WasteLawChatMessage[] } | null {
+	const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+	if (rawHistory.length > MAX_CHAT_HISTORY_MESSAGES) {
+		res.status(422).json({
+			error: `history must not exceed ${MAX_CHAT_HISTORY_MESSAGES} messages.`,
+		});
+		return null;
+	}
+
+	const history: WasteLawChatMessage[] = [];
+	for (const item of rawHistory) {
+		const role = item?.role;
+		const content = typeof item?.content === 'string' ? item.content.trim() : '';
+		if ((role !== 'user' && role !== 'assistant') || !content) {
+			res.status(422).json({ error: 'history items must be { role: user|assistant, content: string }.' });
+			return null;
+		}
+		history.push({ role, content: content.slice(0, MAX_CHAT_HISTORY_CONTENT_LENGTH) });
+	}
+
+	return { history };
+}
 
 // Validates auth + body for the waste-law chat routes (buffered and streaming).
 // Writes the error response and returns null when the request is rejected;
@@ -944,24 +988,11 @@ function parseWasteLawChatRequest(
 		return null;
 	}
 
-	// History is untrusted client input — validate shape and cap size here.
-	const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
-	if (rawHistory.length > MAX_LAW_CHAT_HISTORY_MESSAGES) {
-		res.status(422).json({
-			error: `history must not exceed ${MAX_LAW_CHAT_HISTORY_MESSAGES} messages.`,
-		});
+	const parsedHistory = parseChatHistory(req, res);
+	if (!parsedHistory) {
 		return null;
 	}
-	const history: WasteLawChatMessage[] = [];
-	for (const item of rawHistory) {
-		const role = item?.role;
-		const content = typeof item?.content === 'string' ? item.content.trim() : '';
-		if ((role !== 'user' && role !== 'assistant') || !content) {
-			res.status(422).json({ error: 'history items must be { role: user|assistant, content: string }.' });
-			return null;
-		}
-		history.push({ role, content: content.slice(0, MAX_LAW_CHAT_HISTORY_CONTENT_LENGTH) });
-	}
+	const { history } = parsedHistory;
 
 	const accessToken = parseBearerToken(req);
 	if (!accessToken) {

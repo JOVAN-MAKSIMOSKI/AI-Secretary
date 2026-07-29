@@ -10,6 +10,7 @@ import {
   calendarExtractionSchema,
 } from '../agent/calendarTime.js';
 import { parseRelativeDateRange } from '../agent/dateRangeParser.js';
+import { sanitizeForSpeech } from '../agent/generalChatChain.js';
 
 const SCHEMA_DEFAULT_DURATION_MINUTES = 15;
 // Fixed "now" so relative-range assertions are deterministic. A Wednesday, mid-month,
@@ -144,4 +145,63 @@ test('calendar schema rejects the payload shapes an extractor actually gets wron
   for (const { payload, why } of rejected) {
     assert.equal(calendarExtractionSchema.safeParse(payload).success, false, `should reject: ${why}`);
   }
+});
+
+// --- general chat: spoken-output sanitiser ------------------------------------
+// The voice prompt forbids markdown and links, but after a web search the model
+// appends "([domain](url))" citations anyway — a probe caught it reading a full
+// tracking URL down the phone. sanitizeForSpeech is the deterministic guarantee
+// that replaced trusting the prompt, so it is pinned here rather than left to a
+// paid eval. Every case below is a real shape observed in probe output.
+
+test('sanitizeForSpeech strips everything TTS would read as gibberish', () => {
+  const cases: Array<{ from: string; expected: string; why: string }> = [
+    {
+      from: 'Brent е околу 85 долари. ([oilmarketcap.com](https://oilmarketcap.com/?utm_source=openai))',
+      expected: 'Brent е околу 85 долари.',
+      why: 'parenthesised citation — the exact shape the probe caught being read aloud',
+    },
+    {
+      from: 'See [the report](https://example.com/a) for details.',
+      expected: 'See the report for details.',
+      why: 'inline link keeps its label, drops the target',
+    },
+    {
+      from: 'Read more at https://example.com/very/long/path?utm_source=x',
+      expected: 'Read more at',
+      why: 'bare URL removed entirely',
+    },
+    {
+      from: '- first point\n- second point',
+      expected: 'first point second point',
+      why: 'list markers dropped, lines joined into speakable prose',
+    },
+    {
+      from: '## Heading\n**bold** and `code`',
+      expected: 'Heading bold and code',
+      why: 'heading, emphasis and backtick markers stripped',
+    },
+    {
+      from: 'Добро сум, благодарам. Како можам да помогнам?',
+      expected: 'Добро сум, благодарам. Како можам да помогнам?',
+      why: 'clean Macedonian prose passes through untouched — Cyrillic must not be mangled',
+    },
+  ];
+
+  for (const { from, expected, why } of cases) {
+    assert.equal(sanitizeForSpeech(from), expected, why);
+  }
+});
+
+test('sanitizeForSpeech output never contains a URL or markdown link syntax', () => {
+  // Property-style backstop: whatever the model emits, these two must not survive
+  // into a TTS payload. Guards against a future edit that handles one shape and
+  // silently reopens another.
+  const messy =
+    'Cena e 85 dolari ([a.com](https://a.com/x)) i [b](http://b.io/y), plus http://c.net/z — **kraj**';
+  const cleaned = sanitizeForSpeech(messy);
+
+  assert.ok(!/https?:\/\//.test(cleaned), `URL survived sanitising: ${cleaned}`);
+  assert.ok(!/\[[^\]]*\]\([^)]*\)/.test(cleaned), `markdown link survived: ${cleaned}`);
+  assert.ok(!cleaned.includes('*'), `emphasis marker survived: ${cleaned}`);
 });

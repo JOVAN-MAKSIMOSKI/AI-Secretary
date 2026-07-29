@@ -1392,8 +1392,9 @@ export type ExtractedInvoiceFromMessage = {
 
 // The chains the dashboard chat can land on. Narrower than the agent's full ChainId
 // union — read-only query chains (task_query, calendar_query, firm_lookup, waste_law_query)
-// answer in prose and never reach the extraction branches below.
+// and general_chat answer in prose and never reach the extraction branches below.
 export type ResolvedDashboardChainId =
+  | "general_chat"
   | "invoice_extraction"
   | "offer_extraction"
   | "calendar_event_extraction"
@@ -1430,7 +1431,13 @@ const calendarBookingResultSchema = z
   })
   .strict();
 
-export async function extractDashboardMessage(message: string, externalSignal?: AbortSignal): Promise<DashboardResolveAndRunResponse> {
+export async function extractDashboardMessage(
+  message: string,
+  externalSignal?: AbortSignal,
+  // Only general_chat uses this; the extraction chains stay single-shot. Sent on
+  // every call so a conversational follow-up ("and in English?") still resolves.
+  history: LawChatHistoryMessage[] = []
+): Promise<DashboardResolveAndRunResponse> {
   const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 
   const controller = new AbortController();
@@ -1448,7 +1455,7 @@ export async function extractDashboardMessage(message: string, externalSignal?: 
     response = await fetch(`${agentApiBaseUrl}/agent/resolve-and-run`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, history }),
       signal: controller.signal,
     });
   } catch (error) {

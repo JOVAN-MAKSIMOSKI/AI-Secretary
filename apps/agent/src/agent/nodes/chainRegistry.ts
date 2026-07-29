@@ -7,7 +7,8 @@ export type ChainId =
   | 'calendar_query'
   | 'firm_lookup'
   | 'identification_form_extraction'
-  | 'transport_form_extraction';
+  | 'transport_form_extraction'
+  | 'general_chat';
 
 export interface ChainDefinition {
   id: ChainId;
@@ -76,6 +77,13 @@ export const CHAIN_REGISTRY: ChainDefinition[] = [
     displayName: 'Transport Form Extraction',
     description:
       "Creates a waste transport form / transport manifest (транспортен формулар за отпад) — the legal document that accompanies waste while it MOVES between parties. Use when the user describes a transfer or shipment of waste: a firm handing waste over, the quantity collected and the date of that handover, and a disposal place / end owner (депонија, краен поседувач) that receives it, with the quantity and date received there. The defining signal is movement between two named parties. Contrast with identification_form_extraction, which identifies a single batch of waste at one location (packing method, waste origin, operation code, responsible person) and has no receiving party or destination.",
+    keywords: [],
+  },
+  {
+    id: 'general_chat',
+    displayName: 'General Chat',
+    description:
+      "LAST RESORT ONLY — the fallback for messages no other chain covers. Use it for greetings and pleasantries ('здраво', 'како си', 'thanks'), for general knowledge or world facts unrelated to this business, and for open-ended questions that need looking something up on the public internet (news, prices, weather, definitions). Do NOT choose this chain merely because a request is casually or vaguely phrased: a chatty request to make an invoice is still invoice_extraction, and 'what have I got on today' is still calendar_query. Above all, never choose it for anything about the caller's own stored data — their tasks (task_query), meetings (calendar_query), saved firm details (firm_lookup), or North Macedonia waste legislation (waste_law_query) — nor for producing any document (invoice_extraction, offer_extraction, identification_form_extraction, transport_form_extraction). If any other chain in this catalog plausibly fits the request, pick that chain instead of this one.",
     keywords: [],
   },
 ];

@@ -1,5 +1,7 @@
 {
   "_comment": "Committed contract for Gate B. Measured 2026-07-22 on openai/gpt-4o-mini: 16/16 = 1.000 overall, every chain 4/4, after the inv-mk-transport case was retired. With 16 cases one case is worth 0.0625, so a 0.93 floor tolerates exactly one miss (15/16 = 0.9375 passes) and fails at two (14/16 = 0.875). Raising this after a green run is how gains get locked in; lowering it is accepting a regression and must be its own reviewable diff.",
   "overallAccuracy": 0.93,
-  "perChainAccuracy": 0.75
+  "perChainAccuracy": 0.75,
+  "_comment_general_chat": "maxGeneralChatFalsePositives is deliberately 0, and is a stricter instrument than the accuracy floors on purpose. Those floors are aggregate and slack by design; this counts one asymmetric direction of error — a request that belonged to another chain being swallowed by the catch-all. That is not a slightly worse answer, it is an invoice never drafted or a task list never read, so it gets no tolerance. Measured 0 across all 58 cases. If it trips, tighten the general_chat description in chainRegistry.ts; raising this number hides the regression instead of fixing it.",
+  "maxGeneralChatFalsePositives": 0
 }
