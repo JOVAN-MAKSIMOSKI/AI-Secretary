@@ -10,6 +10,7 @@ import {
 } from './calendarTime.js';
 
 import { createCalendarEvent } from '../mcp/calendar.js';
+import { UpstreamUnavailableError } from '../lib/errors.js';
 
 // PY_SERVICE_URL is the canonical var (zod-validated in lib/env.ts); the legacy
 // PYTHON_SERVICE_URL name is kept as a fallback so older env files keep working.
@@ -30,19 +31,31 @@ async function callPythonExtraction(
   accessToken: string,
   message: string,
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(`${PYTHON_SERVICE_URL}${endpointPath}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ message }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${PYTHON_SERVICE_URL}${endpointPath}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ message }),
+    });
+  } catch (error) {
+    // fetch only rejects on transport failure — the Python service is down or unreachable.
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new UpstreamUnavailableError(`Python service unreachable at ${endpointPath}: ${detail}`);
+  }
 
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
   if (!response.ok) {
     const detail = typeof payload.detail === 'string' ? payload.detail : 'Extraction request failed.';
+    // 5xx means Python itself failed (its extraction chain raises 502 when the LLM call
+    // dies); 4xx means it rejected this specific input. Only the former is an outage.
+    if (response.status >= 500) {
+      throw new UpstreamUnavailableError(`Python ${endpointPath} failed (${response.status}): ${detail}`);
+    }
     throw new Error(detail);
   }
 

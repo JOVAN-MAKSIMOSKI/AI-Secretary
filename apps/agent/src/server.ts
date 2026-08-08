@@ -35,6 +35,8 @@ import { supabase } from './lib/supabase.js';
 import { writeAuditLog } from './repository/auditLogs.js';
 import { startStorageCleanupSchedule } from './jobs/storageCleanup.js';
 import { logger } from './lib/logger.js';
+import { UpstreamUnavailableError } from './lib/errors.js';
+import { GeneralChatUnavailableError } from './agent/generalChatChain.js';
 
 type AuthenticatedRequest = Request & { userAuthId?: string };
 
@@ -91,6 +93,28 @@ function toSafeError(error: unknown, fallback: string): string {
 		logger.error({ err: String(error) }, fallback);
 	}
 	return fallback;
+}
+
+// Answer 503 when the failure was upstream (LLM provider, Python service) and 400 only
+// when the caller actually sent something wrong. Collapsing both onto 400 is what made a
+// vendor retirement look like a malformed prompt at the browser.
+const UPSTREAM_UNAVAILABLE_MESSAGE =
+	'AI provider or downstream service unavailable. This is not a problem with your request — check the agent logs.';
+
+function isUpstreamFailure(error: unknown): boolean {
+	return error instanceof UpstreamUnavailableError || error instanceof GeneralChatUnavailableError;
+}
+
+/**
+ * Send a failed agent/chain response with a status that reflects the cause. The detailed
+ * error still goes only to the log — the client sees a generic string either way.
+ */
+function sendChainError(res: Response, error: unknown, badRequestFallback: string): void {
+	if (isUpstreamFailure(error)) {
+		res.status(503).json({ error: toSafeError(error, UPSTREAM_UNAVAILABLE_MESSAGE) });
+		return;
+	}
+	res.status(400).json({ error: toSafeError(error, badRequestFallback) });
 }
 
 /** Return false and send 422 if value is not a valid UUID. */
@@ -930,7 +954,7 @@ app.post(
 				meta: { chainId: result.chainId, confidence: result.confidence },
 			});
 		} catch (error) {
-			res.status(400).json({ error: toSafeError(error, 'Failed to resolve and execute chain.') });
+			sendChainError(res, error, 'Failed to resolve and execute chain.');
 		}
 	},
 );
@@ -1020,7 +1044,7 @@ app.post(
 			const result = await runWasteLawChain({ tenantId, userAuthId, accessToken, message, history });
 			res.json({ answer: result.answer });
 		} catch (error) {
-			res.status(400).json({ error: toSafeError(error, 'Failed to answer waste-law question.') });
+			sendChainError(res, error, 'Failed to answer waste-law question.');
 		}
 	},
 );
@@ -1042,7 +1066,7 @@ app.post(
 			const tenantId = await getTenantForUser(userAuthId);
 			({ stream } = await runWasteLawChainStream({ tenantId, userAuthId, accessToken, message, history }));
 		} catch (error) {
-			res.status(400).json({ error: toSafeError(error, 'Failed to answer waste-law question.') });
+			sendChainError(res, error, 'Failed to answer waste-law question.');
 			return;
 		}
 

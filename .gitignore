@@ -47,3 +47,9 @@ supabase/.temp/
 *.code-workspace
 
 documentation.txt
+
+# Qdrant local-mode artifacts. The qdrant_data rules above cover the intended
+# storage dir; these are the same files dropped loose in the service root when a
+# process opens local mode without QDRANT_LOCAL_PATH set.
+**/.lock
+**/meta.json

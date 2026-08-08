@@ -7,7 +7,6 @@ This module configures LlamaIndex runtime settings and exposes helpers to:
 Supported providers:
 - OpenAI / ChatGPT
 - Anthropic / Claude
-- GitHub Models (OpenAI-compatible endpoint)
 """
 
 from __future__ import annotations
@@ -273,13 +272,12 @@ def _configure_llama_index_settings() -> None:
 	process restart to take effect.
 
 	Environment variables:
-	- `RAG_LLM_PROVIDER`: auto|openai|anthropic|github (default: auto)
+	- `RAG_LLM_PROVIDER`: auto|openai|anthropic (default: auto)
 	- `RAG_LLM_MODEL`: provider-specific model name
-	- `RAG_EMBED_PROVIDER`: huggingface|openai|github (default: huggingface)
+	- `RAG_EMBED_PROVIDER`: huggingface|openai (default: huggingface)
 	- `RAG_EMBED_MODEL`: embedding model name
 	- `OPENAI_API_KEY` / `RAG_OPENAI_API_KEY` when using openai
 	- `ANTHROPIC_API_KEY` / `RAG_ANTHROPIC_API_KEY` when using anthropic
-	- `GITHUB_MODELS_TOKEN` / `RAG_GITHUB_MODELS_TOKEN` when using github
 
 	Note: if you switch embedding model/provider, your Qdrant collection may need re-indexing
 	because vector dimensions/distribution can change.
@@ -293,18 +291,15 @@ def _configure_llama_index_settings() -> None:
 
 	openai_api_key = os.getenv("RAG_OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
 	anthropic_api_key = os.getenv("RAG_ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY", "")).strip()
-	github_models_token = os.getenv("RAG_GITHUB_MODELS_TOKEN", os.getenv("GITHUB_MODELS_TOKEN", "")).strip()
 
 	if llm_provider == "auto":
-		if github_models_token:
-			llm_provider = "github"
-		elif openai_api_key:
+		if openai_api_key:
 			llm_provider = "openai"
 		elif anthropic_api_key:
 			llm_provider = "anthropic"
 		else:
 			raise RuntimeError(
-				"No LLM provider configured: set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GITHUB_MODELS_TOKEN, "
+				"No LLM provider configured: set OPENAI_API_KEY or ANTHROPIC_API_KEY, "
 				"or set RAG_LLM_PROVIDER explicitly."
 			)
 
@@ -328,21 +323,10 @@ def _configure_llama_index_settings() -> None:
 
 		llm_model = os.getenv("RAG_LLM_MODEL", "claude-3-5-sonnet-latest")
 		Settings.llm = Anthropic(model=llm_model, api_key=anthropic_api_key)
-	elif llm_provider == "github":
-		if not github_models_token:
-			raise RuntimeError("GITHUB_MODELS_TOKEN (or RAG_GITHUB_MODELS_TOKEN) is required for RAG_LLM_PROVIDER=github")
-		try:
-			from llama_index.llms.openai import OpenAI
-		except ModuleNotFoundError as exc:
-			raise RuntimeError("Missing dependency llama-index-llms-openai") from exc
-
-		llm_model = os.getenv("RAG_LLM_MODEL", "openai/gpt-4.1-mini")
-		Settings.llm = OpenAI(
-			model=llm_model,
-			api_key=github_models_token,
-			api_base="https://models.inference.ai.azure.com",
-		)
 	else:
+		# "github" was removed when GitHub Models was retired (HTTP 410
+		# github_models_retirement_brownout). It now lands here and fails loudly at
+		# startup rather than 410-ing on every query.
 		raise RuntimeError(f"Unsupported RAG_LLM_PROVIDER: {llm_provider}")
 
 	if embed_provider in ("huggingface", "e5"):
@@ -370,21 +354,9 @@ def _configure_llama_index_settings() -> None:
 
 		embedding_model = os.getenv("RAG_EMBED_MODEL", "text-embedding-3-small")
 		Settings.embed_model = OpenAIEmbedding(model=embedding_model, api_key=openai_api_key)
-	elif embed_provider == "github":
-		if not github_models_token:
-			raise RuntimeError("GITHUB_MODELS_TOKEN (or RAG_GITHUB_MODELS_TOKEN) is required for RAG_EMBED_PROVIDER=github")
-		try:
-			from llama_index.embeddings.openai import OpenAIEmbedding
-		except ModuleNotFoundError as exc:
-			raise RuntimeError("Missing dependency llama-index-embeddings-openai") from exc
-
-		embedding_model = os.getenv("RAG_EMBED_MODEL", "text-embedding-3-small")
-		Settings.embed_model = OpenAIEmbedding(
-			model=embedding_model,
-			api_key=github_models_token,
-			api_base="https://models.inference.ai.azure.com",
-		)
 	else:
+		# "github" was removed alongside the LLM branch — same retired endpoint. Note
+		# that switching embed providers requires re-indexing the Qdrant collection.
 		raise RuntimeError(f"Unsupported RAG_EMBED_PROVIDER: {embed_provider}")
 
 	# Only mark configured after both models built — a raise above leaves the

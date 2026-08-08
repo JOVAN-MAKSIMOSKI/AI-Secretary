@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 
+import { UpstreamUnavailableError } from '../../lib/errors.js';
 import type { ChainDefinition, ChainId } from './chainRegistry.js';
 
 export interface ResolverDecision {
@@ -9,10 +10,13 @@ export interface ResolverDecision {
   missingInfo: string[];
 }
 
-type RouterProvider = 'auto' | 'anthropic' | 'github' | 'openai' | 'keyword';
+// 'github' (GitHub Models) was removed when the service was retired — its endpoint now
+// answers HTTP 410 github_models_retirement_brownout. It is deliberately absent rather
+// than aliased to openai so a stale ROUTER_LLM_PROVIDER=github fails loudly at the
+// resolver instead of silently re-pointing routing at a different vendor's billing.
+type RouterProvider = 'auto' | 'anthropic' | 'openai' | 'keyword';
 
 const DEFAULT_ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
-const DEFAULT_GITHUB_MODEL = process.env.ROUTER_LLM_MODEL || 'gpt-4o';
 const DEFAULT_OPENAI_MODEL = process.env.ROUTER_LLM_MODEL || 'gpt-4o-mini';
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 
@@ -21,8 +25,13 @@ let client: Anthropic | null = null;
 function getRouterProvider(): RouterProvider {
   // Only read ROUTER_LLM_PROVIDER — RAG_LLM_PROVIDER belongs to the Python service and must not bleed into the router.
   const raw = (process.env.ROUTER_LLM_PROVIDER || 'auto').trim().toLowerCase();
-  if (raw === 'anthropic' || raw === 'github' || raw === 'openai' || raw === 'keyword') {
+  if (raw === 'anthropic' || raw === 'openai' || raw === 'keyword') {
     return raw;
+  }
+  if (raw === 'github') {
+    throw new UpstreamUnavailableError(
+      'ROUTER_LLM_PROVIDER=github is no longer supported: GitHub Models has been retired. Set it to openai (with OPENAI_API_KEY) or anthropic (with ANTHROPIC_API_KEY).',
+    );
   }
   return 'auto';
 }
@@ -30,19 +39,6 @@ function getRouterProvider(): RouterProvider {
 function allowKeywordFallback(): boolean {
   const raw = (process.env.ROUTER_ALLOW_KEYWORD_FALLBACK || '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes';
-}
-
-function getGithubModelsToken(): string {
-  return (
-    process.env.ROUTER_GITHUB_MODELS_TOKEN ||
-    process.env.RAG_GITHUB_MODELS_TOKEN ||
-    process.env.GITHUB_MODELS_TOKEN ||
-    ''
-  ).trim();
-}
-
-function getGithubModelsApiBase(): string {
-  return (process.env.ROUTER_GITHUB_MODELS_API_BASE || 'https://models.inference.ai.azure.com').trim();
 }
 
 function getOpenAiToken(): string {
@@ -57,10 +53,6 @@ function getRouterModel(provider: Exclude<RouterProvider, 'auto'>): string {
   const override = (process.env.ROUTER_LLM_MODEL || '').trim();
   if (override) {
     return override;
-  }
-
-  if (provider === 'github') {
-    return DEFAULT_GITHUB_MODEL;
   }
 
   if (provider === 'openai') {
@@ -215,8 +207,9 @@ async function resolveWithAnthropic(
   return toDecision(text, chains, 'Resolved via Anthropic router.');
 }
 
-// GitHub Models and OpenAI speak the same /chat/completions protocol, so both routing
-// backends share one implementation and differ only by base URL, token, and model.
+// Kept generic over base URL/token/model even though OpenAI is now the only caller: it
+// is the seam any future OpenAI-compatible backend plugs into, rather than a second copy
+// of the request logic.
 async function resolveWithOpenAiCompatible(
   userMessage: string,
   chains: ChainDefinition[],
@@ -260,18 +253,6 @@ async function resolveWithOpenAiCompatible(
   return toDecision(text, chains, `Resolved via ${config.label} router.`);
 }
 
-function resolveWithGithubModels(
-  userMessage: string,
-  chains: ChainDefinition[],
-): Promise<ResolverDecision | null> {
-  return resolveWithOpenAiCompatible(userMessage, chains, {
-    apiBase: getGithubModelsApiBase(),
-    token: getGithubModelsToken(),
-    model: getRouterModel('github'),
-    label: 'GitHub Models',
-  });
-}
-
 function resolveWithOpenAi(
   userMessage: string,
   chains: ChainDefinition[],
@@ -303,17 +284,13 @@ export async function resolveChainWithLlm(
 
     if (provider === 'anthropic') {
       decision = await resolveWithAnthropic(userMessage, chains);
-    } else if (provider === 'github') {
-      decision = await resolveWithGithubModels(userMessage, chains);
     } else if (provider === 'openai') {
       decision = await resolveWithOpenAi(userMessage, chains);
     } else {
-      // auto mode prefers a paid OpenAI key, then GitHub Models (free tier, daily
-      // request caps), then Anthropic. Each helper returns null when its credential
-      // is absent, so this falls through to whatever is actually configured.
+      // auto mode prefers OpenAI, then Anthropic. Each helper returns null when its
+      // credential is absent, so this falls through to whatever is actually configured.
       decision =
         (await resolveWithOpenAi(userMessage, chains)) ||
-        (await resolveWithGithubModels(userMessage, chains)) ||
         (await resolveWithAnthropic(userMessage, chains));
     }
 
@@ -325,15 +302,18 @@ export async function resolveChainWithLlm(
       return keywordFallback(userMessage, chains);
     }
 
-    throw new Error(
-      'No router LLM is configured or returned invalid output. Set ROUTER_LLM_PROVIDER to openai, github, or anthropic with the matching credential (OPENAI_API_KEY, GITHUB_MODELS_TOKEN, ANTHROPIC_API_KEY).',
+    throw new UpstreamUnavailableError(
+      'No router LLM is configured or returned invalid output. Set ROUTER_LLM_PROVIDER to openai or anthropic with the matching credential (OPENAI_API_KEY, ANTHROPIC_API_KEY).',
     );
   } catch (error) {
     if (fallbackAllowed) {
       return keywordFallback(userMessage, chains);
     }
 
+    // Every failure reaching here is a provider or configuration fault, never bad user
+    // input — the caller's message is only ever prompt content. Typed so routes can
+    // answer 503 rather than blaming the request.
     const message = error instanceof Error ? error.message : 'Unknown router error.';
-    throw new Error(`LLM resolver failed: ${message}`);
+    throw new UpstreamUnavailableError(`LLM resolver failed: ${message}`);
   }
 }

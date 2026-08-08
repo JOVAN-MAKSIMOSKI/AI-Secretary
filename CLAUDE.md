@@ -4,8 +4,8 @@
 
 Two backend services run in parallel and communicate over HTTP:
 
-- **`apps/agent`** — TypeScript, LangGraph orchestrator, MCP servers, Claude API. Always the orchestrator. All LLM calls happen here exclusively.
-- **`apps/python`** — Python, FastAPI. Document generation (Excel/Word), RAG, STT only. Never calls Claude.
+- **`apps/agent`** — TypeScript, LangGraph orchestrator, MCP servers. Always the orchestrator: chain routing, tool-use decisions, and the agent loop live here and nowhere else. Its own LLM calls are currently OpenAI, not Claude — see "LLM & Agent" below.
+- **`apps/python`** — Python, FastAPI. Document generation (Excel/Word), RAG, STT. It **does** make its own LLM calls (OpenAI, via `RAG_LLM_*`) for the `/documents/extract*` chains and RAG answer synthesis — but never to Claude, and it never runs the agent loop or makes routing decisions.
 - **`apps/web`** — React/Vite frontend. Calls `apps/agent` via Axios. Never queries the database directly.
 
 Data flow is strictly one-directional:
@@ -49,7 +49,7 @@ Project rules are split across scoped files so context only loads when relevant.
 | `.claude/rules/guardrails.md` | Always | Critical never-do's, security constraints |
 | `.claude/rules/conventions.md` | Always | Naming, imports, commit messages, file structure |
 | `.claude/rules/frontend.md` | `apps/web/**` | React rules, state management, shadcn/ui, routing |
-| `.claude/rules/agent-service.md` | `apps/agent/**` | LangGraph patterns, tool nodes, approval gate, caching, the `general_chat` OpenAI provider exception |
+| `.claude/rules/agent-service.md` | `apps/agent/**` | LangGraph patterns, tool nodes, approval gate, caching, the LLM resolver + GitHub Models retirement, the `general_chat` OpenAI provider exception |
 | `.claude/rules/python-service.md` | `apps/python/**` | FastAPI routes, openpyxl, python-docx, RAG, STT, uv dependency management, the `tests/` vs `evals/` split and extraction-eval authoring |
 | `.claude/skills/skill-management/` | On demand | Skill creation, testing, post-session review, auditing |
 | `.claude/skills/agent-evals/` | On demand | Three-tier eval pipeline, judge design, golden sets, CI gating |
@@ -101,11 +101,24 @@ These apply to every task in every file, no exceptions.
 - All Supabase Storage paths must be namespaced: `/{tenant_id}/outputs/{type}/{filename}`.
 
 ### LLM & Agent
+
+**Model policy — applies to any Claude call you add:**
 - **Development model:** `claude-haiku-4-5-20251001` — always, until final QA.
 - **Production QA model:** `claude-sonnet-4-6` — only for final quality validation.
 - Never use Opus models.
-- **One documented exception:** `apps/agent/src/agent/generalChatChain.ts` (the `general_chat` catch-all) runs OpenAI `gpt-5-nano`, because only an OpenAI credential exists and the feature needs the hosted `web_search` tool. Scope and reasoning: `.claude/rules/agent-service.md` → "General chat provider exception". This does not generalise to any other call site.
-- Always cache the system prompt using `cache_control: { type: "ephemeral" }` — skipping this wastes ~90% of token cost. (Anthropic syntax; on the OpenAI exception above, caching is automatic and the equivalent duty is keeping the prompt prefix stable.)
+
+**What actually runs today.** Be accurate about this — the policy above is forward-looking, not a description of the current codebase. There are exactly two LLM call sites in `apps/agent`, and **neither is Claude**:
+
+| Call site | Provider / model | Why not Claude |
+|---|---|---|
+| `agent/nodes/llmResolver.ts` (chain routing) | OpenAI `gpt-4o` | Never was Claude. Ran GitHub Models until its 2026-08 retirement, then moved to OpenAI. An Anthropic branch exists in the code but is dormant — no `ANTHROPIC_API_KEY` is set. |
+| `agent/generalChatChain.ts` (`general_chat` catch-all) | OpenAI `gpt-5-nano` | Only an OpenAI credential exists, and the feature needs the hosted `web_search` tool. |
+
+Both are scoped in `.claude/rules/agent-service.md` ("LLM Resolver" and "General chat provider exception"). Neither generalises: adding a *new* LLM call means Claude under the policy above, not "OpenAI, like the others".
+
+`src/lib/claude.ts` is an **empty stub** (`export {}`). Its header comment claims all LLM calls must route through it; nothing does, and it wires up no client. Treat it as an unimplemented placeholder — do not cite it as evidence Claude is in use, and either implement it or delete it before adding the first real Claude call.
+
+- Always cache the system prompt using `cache_control: { type: "ephemeral" }` — skipping this wastes ~90% of token cost. (Anthropic syntax; on the OpenAI call sites above, caching is automatic and the equivalent duty is keeping the prompt prefix stable.)
 - Never send an email or save a file without a human approval gate (`interrupt_before`).
 - Never call the Claude API from `apps/python`.
 

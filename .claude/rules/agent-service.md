@@ -20,24 +20,34 @@ Applies when Claude touches any file under `apps/agent/**`.
 
 ## Model Selection
 
+Policy for any Claude call you **add** to this service:
+
 - **Development / testing:** `claude-haiku-4-5-20251001` — always, until final QA
 - **Production QA only:** `claude-sonnet-4-6` — final quality validation only
 - Never use Opus models
 
+**No Claude call currently runs in this service.** Both existing LLM call sites are
+OpenAI — the router (below) and `generalChatChain.ts`. `src/lib/claude.ts` is an empty
+stub. The rules above therefore govern new work, not existing code; do not read them as
+a description of what is wired up today, and do not read the two OpenAI call sites as a
+precedent for a third.
+
 ### General chat provider exception
 
-`src/agent/generalChatChain.ts` is the **one** user-facing prose call in this service
-that is not Claude. It runs OpenAI `gpt-5-nano` against the Responses API
-(`GENERAL_CHAT_API_KEY`, overridable with `GENERAL_CHAT_MODEL`).
+`src/agent/generalChatChain.ts` is the one user-facing **prose** call in this service.
+It runs OpenAI `gpt-5-nano` against the Responses API (`GENERAL_CHAT_API_KEY`,
+overridable with `GENERAL_CHAT_MODEL`). The router is also OpenAI but is a separate,
+separately-justified case — see "LLM Resolver" below; this section does not cover it.
 
 Two reasons, both binding:
 
 1. Only an OpenAI credential exists for this project. `ANTHROPIC_API_KEY` is not set,
    which is also why the pre-existing voice fallback had been silently returning its
    canned error on every call before this chain replaced it.
-2. The feature requires live web search. The hosted `web_search` tool is a provider
-   feature, and there is no GitHub Models equivalent — doing it on the existing
-   routing credential would mean a separate search vendor plus a hand-rolled tool loop.
+2. The feature requires live web search, and the hosted `web_search` tool is a provider
+   feature. (This reason originally read "there is no GitHub Models equivalent." That
+   framing died with GitHub Models — routing is now OpenAI too, so both calls happen to
+   sit on the same vendor. Reason 1 is what still binds the exception.)
 
 Model choice is not arbitrary and should not be changed casually: `gpt-5-nano` is the
 cheapest model that actually supports the hosted tool (`gpt-4.1-nano` rejects it —
@@ -54,9 +64,15 @@ Scope of the exception, precisely:
   OpenAI caches prompt prefixes automatically, so the mandatory-caching rule is met by
   keeping the system prompt prefix stable, not by a parameter.
 
-`GENERAL_CHAT_API_KEY` is deliberately **not** named `OPENAI_API_KEY`: the resolver's
-auto mode ranks OpenAI above the free GitHub Models tier, so reusing that name would
-silently move every routing call onto paid billing.
+`GENERAL_CHAT_API_KEY` stays a **separate var** from `OPENAI_API_KEY`, though both may
+now hold the same key value.
+
+The original reason no longer applies: naming it `OPENAI_API_KEY` used to flip the
+resolver's auto mode off the free GitHub Models tier onto paid billing. That tier is
+gone and routing is paid regardless. The reason to keep the split is now narrower but
+still real — chat spend stays attributable and separately revocable from routing spend,
+and the two can be pointed at different keys or projects without re-plumbing anything.
+Do not collapse them into one var just because they currently carry the same value.
 
 Two behaviours in that module are deliberate and were driven by measured failures —
 do not "simplify" them away:
@@ -281,23 +297,38 @@ The `/agent/resolve-and-run` endpoint calls `runDirectResolverChain()` and retur
 
 ## LLM Resolver — How It Actually Works
 
-`llmResolver.ts` supports three routing providers, selected via env vars:
+`llmResolver.ts` supports two routing providers, selected via env vars:
 
 | Env var | Values | Behavior |
 |---|---|---|
-| `ROUTER_LLM_PROVIDER` | `openai`, `anthropic`, `github`, `keyword`, `auto` | Selects routing backend |
+| `ROUTER_LLM_PROVIDER` | `openai`, `anthropic`, `keyword`, `auto` | Selects routing backend |
 | `ROUTER_ALLOW_KEYWORD_FALLBACK` | `true`/`1` | Falls back to keyword matching if LLM fails — **policy: keep `false`**, see `guardrails.md` Router LLM Env Vars |
 | `ROUTER_LLM_MODEL` | model name | Overrides default model for either provider |
-| `ROUTER_GITHUB_MODELS_TOKEN` | token | Required for GitHub Models provider |
 | `OPENAI_API_KEY` | key | Required for the OpenAI provider |
 | `ANTHROPIC_MODEL` | model name | Override for Anthropic routing model |
 
-**Auto mode priority:** OpenAI → GitHub Models → Anthropic → keyword fallback (if allowed).
+**Auto mode priority:** OpenAI → Anthropic → keyword fallback (if allowed).
 
-GitHub Models and OpenAI share one implementation (`resolveWithOpenAiCompatible`) because
-both speak the same `/chat/completions` protocol — they differ only by base URL, token,
-and model. Add any future OpenAI-compatible backend as another thin wrapper rather than a
-fourth copy of the request logic.
+### GitHub Models is retired (2026-08)
+
+`github` was a supported provider until GitHub Models was shut down. Both of its
+endpoints are now dead — `models.inference.ai.azure.com` returns 404 and
+`models.github.ai/inference` returns HTTP 410 `github_models_retirement_brownout`.
+
+The provider was removed from `llmResolver.ts` rather than aliased onto OpenAI, and
+`ROUTER_LLM_PROVIDER=github` now **throws** in `getRouterProvider()`. That throw is
+placed outside the resolver's `try`, so it cannot be swallowed by keyword fallback even
+if someone re-enables it. Silently re-pointing a stale `github` setting at OpenAI would
+move routing onto a different vendor's billing without anyone noticing — a loud failure
+at boot is the cheaper mistake. The same removal was applied on the Python side
+(`services/ragagent.py`, `langchain.py`, `scripts/ingest.py`).
+
+There is no free routing tier any more. Routing is a paid OpenAI call, and any advice
+to "fall back to the free tier" is stale.
+
+`resolveWithOpenAiCompatible` is still generic over base URL/token/model even though
+OpenAI is its only caller — it is the seam a future OpenAI-compatible backend plugs
+into, rather than a second copy of the request logic.
 
 Keyword fallback returns confidence `0.55` (keyword match) or `0.35` (no match) — it is
 disabled by policy (`ROUTER_ALLOW_KEYWORD_FALLBACK=false`); the mechanics remain documented
@@ -320,6 +351,36 @@ the false-positive gate in `src/evals/routing.eval.ts`, which fails the build if
 poaches a request belonging to another chain.
 
 **When adding a new chain:** update `chainRegistry.ts` with the new `ChainDefinition` (id, displayName, description, keywords) in the same commit as any other changes. `llmResolver.ts` reads the registry dynamically — no changes needed there.
+
+---
+
+## Error Status Contract (routes)
+
+Chain-backed routes must distinguish *who is at fault*. `src/lib/errors.ts` defines
+`UpstreamUnavailableError`; `server.ts` maps it — plus `GeneralChatUnavailableError` —
+to **503**, and everything else to **400**, via `sendChainError(res, error, fallback)`.
+
+| Cause | Error thrown | Status |
+|---|---|---|
+| LLM provider down, retired, or unconfigured | `UpstreamUnavailableError` (from `llmResolver`) | 503 |
+| Python service unreachable, or answering 5xx | `UpstreamUnavailableError` (from `callPythonExtraction`) | 503 |
+| `general_chat` provider unavailable | `GeneralChatUnavailableError` | 503 |
+| Python rejected this input (4xx) | plain `Error` | 400 |
+| Malformed request body | validated inline | 400/422 |
+
+Why this exists: every failure used to return 400, so the GitHub Models retirement
+surfaced in the browser as "Bad Request" — which reads as *your prompt was malformed* and
+sent debugging at the prompt instead of the provider. A vendor outage is not the caller's
+fault and the status code must not say it is.
+
+Rules when adding a chain-backed route:
+
+- Use `sendChainError`, not a bare `res.status(400)`.
+- Anything wrapping a provider or cross-service call throws `UpstreamUnavailableError`.
+- Never widen it to genuine input validation — a 503 that should be a 400 tells the user
+  to wait for a recovery that will never come.
+- The client still only ever receives a generic string; `toSafeError` keeps the detail in
+  the log. Do not "improve" this by returning the raw provider message.
 
 ---
 
