@@ -49,8 +49,9 @@ def synthesize(text: str, voice: str | None = None) -> bytes:
         speech_config=speech_config,
         audio_config=None,  # in-memory output — no speaker or file
     )
-    # Send SSML rather than plain text so the Bitola-dialect prosody envelope and
-    # <sub alias> word substitutions tuned in Audio Content Creation are applied.
+    # SSML rather than plain text so the voice and language are stated explicitly.
+    # By default this carries no prosody or word substitutions — the stock Azure
+    # voice. The Bitola-dialect layer is opt-in via AZURE_TTS_DIALECT_TUNING.
     ssml = build_ssml(text, resolved_voice)
     result = synthesizer.speak_ssml_async(ssml).get()
 

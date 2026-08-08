@@ -1,9 +1,18 @@
-"""SSML construction for Azure TTS — applies the Bitola-dialect voice tuning.
+"""SSML construction for Azure TTS.
 
-Plain LLM text carries none of the tuning captured in Azure Audio Content
-Creation. That tuning is two things: a fixed <prosody> envelope, and a set of
-<sub alias> word substitutions that re-voice standard Macedonian words into the
-target Bitola dialect. build_ssml() re-applies both to arbitrary runtime text.
+Default behaviour is the **stock Azure voice with no modification**: the text is
+XML-escaped and wrapped in <speak><voice>, nothing else.
+
+An optional Bitola-dialect tuning layer is preserved here but is OFF unless
+AZURE_TTS_DIALECT_TUNING is truthy. That tuning is two things: a fixed <prosody>
+envelope, and a set of <sub alias> word substitutions that re-voice standard
+Macedonian words into the target Bitola dialect, both captured in Azure Audio
+Content Creation.
+
+The tuning is opt-in rather than deleted so the Audio Content Creation work is
+recoverable, but note it is opinionated — it changes pitch/rate/volume and
+rewrites whole words (e.g. "здраво" is spoken as "кај си море муце"). Do not
+enable it expecting a neutral voice.
 
 The substitution map lives here as an in-repo lexicon rather than a hosted PLS
 lexicon file: simplest for the single-voice test phase. Migrate to a hosted
@@ -12,10 +21,12 @@ lexicon later if the map grows large or must be shared across services.
 
 from __future__ import annotations
 
+import os
 import re
 from xml.sax.saxutils import escape, quoteattr
 
 _SSML_LANG = "mk-MK"
+_DIALECT_TUNING_ENV = "AZURE_TTS_DIALECT_TUNING"
 
 # Global prosody envelope applied to the whole utterance. These are the
 # body-speech values tuned in Audio Content Creation. The tool also had a
@@ -64,20 +75,41 @@ def _apply_aliases(escaped_text: str) -> str:
     return _SUB_PATTERN.sub(_replace, escaped_text)
 
 
-def build_ssml(text: str, voice: str) -> str:
-    """Wrap plain text in the dialect prosody envelope + <sub alias> tags.
+def dialect_tuning_enabled() -> bool:
+    """True only when AZURE_TTS_DIALECT_TUNING is explicitly turned on.
 
-    text is XML-escaped first (LLM output may contain & < > "), then keyword
-    substitution runs on the escaped string in a single pass so inserted alias
-    markup is never re-matched.
+    Read per call rather than cached at import so the setting can be flipped in a
+    test or a running process without a restart.
     """
-    body = _apply_aliases(escape(text))
+    return os.getenv(_DIALECT_TUNING_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def build_ssml(text: str, voice: str, tuned: bool | None = None) -> str:
+    """Wrap text in SSML for the given voice.
+
+    By default this is the plain, unmodified Azure voice — no prosody envelope and
+    no word substitutions. Pass tuned=True (or set AZURE_TTS_DIALECT_TUNING) to
+    re-apply the Bitola-dialect layer.
+
+    text is XML-escaped first (LLM output may contain & < > "). When tuning is on,
+    keyword substitution runs on the escaped string in a single pass so inserted
+    alias markup is never re-matched.
+    """
+    if tuned is None:
+        tuned = dialect_tuning_enabled()
+
+    body = escape(text)
+    if tuned:
+        body = _apply_aliases(body)
+        body = (
+            f'<prosody rate="{_PROSODY_RATE}" volume="{_PROSODY_VOLUME}" '
+            f'pitch="{_PROSODY_PITCH}">{body}</prosody>'
+        )
+
     return (
         '<speak version="1.0" '
         f'xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{_SSML_LANG}">'
         f"<voice name={quoteattr(voice)}>"
-        f'<prosody rate="{_PROSODY_RATE}" volume="{_PROSODY_VOLUME}" '
-        f'pitch="{_PROSODY_PITCH}">'
         f"{body}"
-        "</prosody></voice></speak>"
+        "</voice></speak>"
     )
