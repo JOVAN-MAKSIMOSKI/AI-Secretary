@@ -158,14 +158,17 @@ secretary/
 
 Two backend services run in parallel and communicate over HTTP:
 
-1. apps/agent — TypeScript, LangGraph orchestrator, MCP servers, Claude API
+1. apps/agent — TypeScript, LangGraph orchestrator, MCP servers
 2. apps/python — Python, FastAPI, document generation, RAG, STT
 
 ## Service Boundaries
 
 - The agent service is always the orchestrator.
 - The Python service exposes HTTP endpoints that the agent calls as tools.
-- All LLM calls happen exclusively in apps/agent, never in apps/python.
+- Orchestration LLM calls (chain routing, the agent loop, tool-use decisions) happen
+  exclusively in apps/agent. apps/python makes its own scoped LLM calls for the
+  /documents/extract* chains and RAG answer synthesis — never Claude, and never routing.
+- Neither service currently calls Claude: both use OpenAI. See CLAUDE.md → "LLM & Agent".
 - The React frontend in apps/web calls apps/agent directly via Axios.
 
 ## LLM Resolver Contract

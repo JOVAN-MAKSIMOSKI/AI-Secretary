@@ -49,11 +49,18 @@ Every rule below serves one of these three.
 - Never call the Claude API from Python — only from TypeScript (`apps/agent`)
 - Never send an email or save a file without a human approval gate (`interrupt_before`)
 - Never skip system prompt caching — reduces cost by ~90%
-- The Haiku-only rule has exactly one carve-out: `generalChatChain.ts` runs OpenAI
-  `gpt-5-nano` for the `general_chat` catch-all (only an OpenAI credential exists, and
-  the hosted `web_search` tool has no GitHub Models equivalent). It is scoped in
-  `.claude/rules/agent-service.md`. Never widen it to another call site, and never read
-  it as permission to call an LLM from `apps/python` — that prohibition is unaffected.
+- The Haiku rule is a policy for Claude calls you **add** — it is not a description of
+  the current codebase. Two LLM call sites exist in `apps/agent` and neither is Claude:
+  `nodes/llmResolver.ts` (routing, OpenAI `gpt-4o`) and `generalChatChain.ts`
+  (`general_chat` prose, OpenAI `gpt-5-nano`). Both are scoped in
+  `.claude/rules/agent-service.md`. See `CLAUDE.md` → "LLM & Agent" for the full table.
+- Never widen either call site's provider choice to a third. A new LLM call is Claude
+  under the rule above — "the others use OpenAI" is not a precedent, it is two
+  separately-justified historical accidents.
+- Never read either as permission to call an LLM from `apps/python` — that prohibition
+  is unaffected and absolute.
+- `src/lib/claude.ts` is an empty stub whose comment claims all LLM calls route through
+  it. Nothing does. Never cite it as evidence Claude is wired up.
 - Never let `general_chat` absorb a request another chain handles. It is a last resort,
   enforced by `maxGeneralChatFalsePositives` in `src/evals/baseline.json`. If that gate
   trips, tighten the chain description — raising the number hides lost functionality.
@@ -136,6 +143,8 @@ The LLM resolver reads several env vars. The LLM is the only permitted resolver 
 
 - `ROUTER_ALLOW_KEYWORD_FALLBACK=false` always (Phase 4 of the waste-law RAG plan). A resolver failure must surface as a hard error, never degrade to a silent keyword guess.
 - Never set `ROUTER_LLM_PROVIDER=keyword`.
-- Prefer `ROUTER_LLM_PROVIDER=openai` with `OPENAI_API_KEY` set. `github` (GitHub Models) is the acceptable free-tier alternative but has daily request caps — a quota error there fails a build for a reason unrelated to code quality. `anthropic` remains supported. Either way an LLM provider key must be present at startup so the LLM path is always available.
-- `EVALAPIKEY` is evaluation-only. It is mapped onto `OPENAI_API_KEY` inside the eval process by `src/evals/evalEnv.ts` and must never be used as the running service's routing credential.
+- Use `ROUTER_LLM_PROVIDER=openai` with `OPENAI_API_KEY` set. `anthropic` remains supported. An LLM provider key must be present at startup so the LLM path is always available.
+- **Never set `ROUTER_LLM_PROVIDER=github`.** GitHub Models was retired in 2026-08; its endpoints return 404 / HTTP 410 `github_models_retirement_brownout`. The provider has been removed from `llmResolver.ts` and this value now throws at startup by design. There is no free routing tier any more — routing is a paid call. If you find guidance anywhere recommending GitHub Models as a free fallback, it is stale; fix it.
+- `EVALAPIKEY` is evaluation-only. It is mapped onto `OPENAI_API_KEY` inside the eval process by `src/evals/evalEnv.ts` and must never be used as the running service's routing credential. Note `evalEnv.ts` falls back to `OPENAI_API_KEY` when `EVALAPIKEY` is unset — now that the service itself sets `OPENAI_API_KEY`, keep `EVALAPIKEY` populated or eval spend silently lands on the routing key.
+- The routing eval pins its own model and does **not** inherit `ROUTER_LLM_MODEL` from `.env`. Production is pinned to `gpt-4o`; the eval runs `gpt-4o-mini` (~10x cheaper) via `EVAL_ROUTER_LLM_MODEL` in `evalEnv.ts`. This is a deliberate cost/fidelity trade: if you change the production routing model, decide separately whether the eval should follow, and remember the accuracy floors in `src/evals/baseline.json` were measured on the eval's model.
 - The `keywords[]` arrays in `chainRegistry.ts` are dead weight under this policy — LLM routing reads chain descriptions only. Leave them empty for new chains (e.g. `waste_law_query`).

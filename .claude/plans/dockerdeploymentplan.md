@@ -288,7 +288,9 @@ GMAIL_OAUTH_FALLBACK_BASE_URL=https://<web-app>.vercel.app
 GMAIL_OAUTH_ALLOWED_REDIRECT_ORIGINS=https://<web-app>.vercel.app
 AGENT_PUBLIC_URL=https://api.YOURDOMAIN.com
 ```
-Plus required carry-overs: `DATABASE_URL` (Supabase **pooled** string), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (**rotate at go-live** — it sat in a dev .env), `INTER_SERVICE_SECRET` (identical in both files), `GMAIL_TOKEN_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID/SECRET`, `GMAIL_OAUTH_STATE_SECRET`, `GOOGLE_REFRESH_TOKEN`, `SMTP_*`, `TWILIO_*`, `VOICE_TTS_PROVIDER`, `ROUTER_*` (keep `ROUTER_ALLOW_KEYWORD_FALLBACK=false`), `RAG_*`, `ANTHROPIC_API_KEY` / `GITHUB_MODELS_TOKEN`.
+Plus required carry-overs: `DATABASE_URL` (Supabase **pooled** string), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (**rotate at go-live** — it sat in a dev .env), `INTER_SERVICE_SECRET` (identical in both files), `GMAIL_TOKEN_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID/SECRET`, `GMAIL_OAUTH_STATE_SECRET`, `GOOGLE_REFRESH_TOKEN`, `SMTP_*`, `TWILIO_*`, `VOICE_TTS_PROVIDER`, `ROUTER_*` (keep `ROUTER_ALLOW_KEYWORD_FALLBACK=false` and `ROUTER_LLM_PROVIDER=openai`), `RAG_*`, `OPENAI_API_KEY`, `GENERAL_CHAT_API_KEY`.
+
+> GitHub Models was retired 2026-08 — `GITHUB_MODELS_TOKEN` is gone and `ROUTER_LLM_PROVIDER=github` now throws at startup. Routing needs `OPENAI_API_KEY` on the box.
 
 `/opt/ai-secretary/python.env`:
 ```
@@ -299,7 +301,7 @@ INTER_SERVICE_SECRET=<same as agent>
 SUPABASE_URL=... / SUPABASE_SERVICE_ROLE_KEY=...
 RAG_EMBED_PROVIDER=huggingface
 RAG_EMBED_MODEL=intfloat/multilingual-e5-large
-RAG_LLM_* / OPENAI_API_KEY / GITHUB_MODELS_TOKEN as in dev
+RAG_LLM_* / OPENAI_API_KEY as in dev
 AZURE_TTS_KEY / AZURE_TTS_REGION / AZURE_TTS_VOICE
 STT_MODEL_SIZE=large-v3   # drop to distil-large-v3/medium if RAM is tight
 STT_DEVICE=cpu

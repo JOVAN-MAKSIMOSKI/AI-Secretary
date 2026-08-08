@@ -29,7 +29,7 @@ Usage:
 Required env vars (loaded from apps/python/.env):
     QDRANT_LOCAL_PATH     local Qdrant storage directory (or QDRANT_URL)
     QDRANT_COLLECTION     target collection (default: waste_management_law_mk_v2)
-    GITHUB_MODELS_TOKEN   only needed for LLM metadata extraction
+    OPENAI_API_KEY        only needed for LLM metadata extraction
 
 System requirements for OCR of scanned pages:
     Tesseract binary with the Macedonian language pack ("mkd").
@@ -93,7 +93,6 @@ OCR_RENDER_DPI = 300
 OCR_LANG = "mkd"
 
 METADATA_LLM_MODEL = "gpt-4o-mini"
-GITHUB_MODELS_BASE_URL = "https://models.inference.ai.azure.com"
 
 EMBED_BATCH_SIZE = 32
 UPSERT_BATCH_SIZE = 100
@@ -124,12 +123,12 @@ def _build_qdrant_client() -> QdrantClient:
 
 
 def _build_metadata_llm_client():
-    """OpenAI-compatible client for GitHub Models, or None if no token."""
-    token = os.getenv("GITHUB_MODELS_TOKEN", os.getenv("RAG_GITHUB_MODELS_TOKEN", "")).strip()
+    """OpenAI client for the metadata pass, or None if no key."""
+    token = os.getenv("RAG_OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
     if not token:
         return None
     from openai import OpenAI
-    return OpenAI(api_key=token, base_url=GITHUB_MODELS_BASE_URL)
+    return OpenAI(api_key=token)
 
 
 def _snapshot_before_destroy(client: QdrantClient, collection_name: str) -> None:
@@ -567,7 +566,7 @@ def main() -> None:
     qdrant = _build_qdrant_client()
     llm_client = None if args.no_metadata_llm else _build_metadata_llm_client()
     if llm_client is None and not args.no_metadata_llm:
-        print("[ingest] No GITHUB_MODELS_TOKEN — falling back to regex metadata.", file=sys.stderr)
+        print("[ingest] No OPENAI_API_KEY — falling back to regex metadata.", file=sys.stderr)
 
     # Order matters more than anything else in this function. Extraction, OCR,
     # metadata and embedding all complete *before* the collection is touched, so

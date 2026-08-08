@@ -115,9 +115,10 @@ export class GeneralChatUnavailableError extends Error {
 }
 
 function getApiKey(): string {
-  // Deliberately its own variable rather than OPENAI_API_KEY: the resolver's auto
-  // mode prefers OPENAI_API_KEY over the free GitHub Models tier, so reusing that
-  // name here would silently move every routing call onto paid billing.
+  // Its own variable rather than OPENAI_API_KEY so chat spend stays attributable and
+  // separately revocable from routing spend. Both may hold the same key value. (The
+  // original reason — that reusing the name would push routing off the free GitHub
+  // Models tier onto paid billing — died with that tier; routing is paid regardless.)
   return (process.env.GENERAL_CHAT_API_KEY || '').trim();
 }
 

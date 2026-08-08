@@ -241,23 +241,17 @@ def _coerce_extracted_value(key: str, value: Any) -> Any:
 _EXTRACTION_TEMPERATURE = 0.0
 
 
-_GITHUB_MODELS_API_BASE = "https://models.inference.ai.azure.com"
-
-
 def get_extraction_llm() -> ChatOpenAI:
     """Initialize the extraction LLM from the shared RAG_LLM_* provider settings."""
     llm_provider = os.getenv("RAG_LLM_PROVIDER", "auto").strip().lower()
     openai_api_key = os.getenv("RAG_OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
-    github_models_token = os.getenv("RAG_GITHUB_MODELS_TOKEN", os.getenv("GITHUB_MODELS_TOKEN", "")).strip()
 
     if llm_provider == "auto":
-        if github_models_token:
-            llm_provider = "github"
-        elif openai_api_key:
+        if openai_api_key:
             llm_provider = "openai"
         else:
             raise RuntimeError(
-                "No LLM provider configured for extraction: set OPENAI_API_KEY or GITHUB_MODELS_TOKEN, "
+                "No LLM provider configured for extraction: set OPENAI_API_KEY, "
                 "or set RAG_LLM_PROVIDER explicitly."
             )
 
@@ -271,17 +265,9 @@ def get_extraction_llm() -> ChatOpenAI:
             temperature=_EXTRACTION_TEMPERATURE,
         )
 
-    if llm_provider == "github":
-        if not github_models_token:
-            raise RuntimeError("GITHUB_MODELS_TOKEN (or RAG_GITHUB_MODELS_TOKEN) is required for RAG_LLM_PROVIDER=github")
-
-        return ChatOpenAI(
-            model=os.getenv("RAG_LLM_MODEL", "openai/gpt-4.1-mini"),
-            api_key=github_models_token,
-            base_url=_GITHUB_MODELS_API_BASE,
-            temperature=_EXTRACTION_TEMPERATURE,
-        )
-
+    # "github" was removed when GitHub Models was retired (HTTP 410
+    # github_models_retirement_brownout). It now lands here and fails loudly at startup
+    # rather than 410-ing on every extraction request.
     raise RuntimeError(f"Unsupported RAG_LLM_PROVIDER for extraction: {llm_provider}")
 
 

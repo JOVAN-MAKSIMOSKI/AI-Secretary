@@ -8,7 +8,9 @@ import { getChainRegistry } from '../agent/nodes/chainRegistry.js';
 import { resolveChainWithLlm } from '../agent/nodes/llmResolver.js';
 import { countCasesByChain, loadGoldenCases, MIN_GOLDEN_CASES_PER_CHAIN } from './goldenSet.js';
 
-// Cleared so no ambient credential lets the resolver reach a provider mid-test.
+// Cleared so no ambient credential lets the resolver reach a provider mid-test. The
+// retired GitHub Models vars stay listed: an old .env may still carry them, and
+// deleting an absent var is a no-op.
 const PROVIDER_CREDENTIAL_VARS = [
   'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
