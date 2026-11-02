@@ -1,5 +1,11 @@
 {
-  "_comment": "Committed contract for the waste-law retrieval eval. Measured 2026-07-22 against collection waste_management_law_mk_v2 (3950 chunks, 46 laws) with intfloat/multilingual-e5-large at top_k=6: 9/9 = 1.000, 8 of 9 at rank 1. With 9 cases one case is worth 0.111, so a 0.85 floor tolerates exactly one miss (8/9 = 0.889) and fails at two (7/9 = 0.778). Raising this after a green run locks the gain in; lowering it accepts a regression and must be its own reviewable diff.",
-  "recallAtK": 0.85,
-  "topK": 6
+  "_comment": "Committed contract for the waste-law retrieval eval (scoring: evals/retrieval_scoring.py). Measured 2026-11-02 against collection waste_management_law_mk_v2 (4585 chunks, 49 source files, current article-boundary chunking) with intfloat/multilingual-e5-large via services.ragagent.build_embed_model() ('query: ' prefix), top_k=10, golden schema v2: 71 in-domain cases (62 article-level) + 4 off-topic. Measured: docRecall 1.000, articleRecall 0.919 (57/62), docMrr 0.864, articleMrr 0.695; every category at doc recall 1.000. Floors sit about two misses below each measurement, so one ranking wobble passes and a real regression fails. Raising a floor after a green run locks the gain in; lowering one accepts a regression and must be its own reviewable diff.",
+  "_comment_doc_level": "Document recall is saturated at 1.000: each law's vocabulary is distinctive enough that the right file nearly always appears somewhere in the top 10. Article recall and the two MRRs are the metrics that move, and they are the ones the planned re-chunk is judged on.",
+  "_comment_off_topic": "Off-topic questions are reported, not gated. Measured top similarity 0.743-0.836 for four off-topic questions vs 0.776 for the weakest rank-1 in-domain hit, so a plain score cutoff cannot separate them with e5-large today. Input to the relevance-cutoff decision (optimisation topic).",
+  "topK": 10,
+  "docRecallAtK": 0.97,
+  "articleRecallAtK": 0.88,
+  "docMrr": 0.83,
+  "articleMrr": 0.66,
+  "minCategoryDocRecall": 0.8
 }
