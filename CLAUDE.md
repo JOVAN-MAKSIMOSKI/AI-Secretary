@@ -50,7 +50,7 @@ Project rules are split across scoped files so context only loads when relevant.
 | `.claude/rules/conventions.md` | Always | Naming, imports, commit messages, file structure |
 | `.claude/rules/frontend.md` | `apps/web/**` | React rules, state management, shadcn/ui, routing |
 | `.claude/rules/agent-service.md` | `apps/agent/**` | LangGraph patterns, tool nodes, approval gate, caching, the LLM resolver + GitHub Models retirement, the `general_chat` OpenAI provider exception |
-| `.claude/rules/python-service.md` | `apps/python/**` | FastAPI routes, openpyxl, python-docx, RAG, STT, uv dependency management, the `tests/` vs `evals/` split and extraction-eval authoring |
+| `.claude/rules/python-service.md` | `apps/python/**` | FastAPI routes, openpyxl, python-docx, RAG, STT, uv dependency management, the `tests/` vs `evals/` split, extraction-eval, retrieval-golden-set and answer-eval authoring, the RAG answer-prompt rules |
 | `.claude/skills/skill-management/` | On demand | Skill creation, testing, post-session review, auditing |
 | `.claude/skills/agent-evals/` | On demand | Three-tier eval pipeline, judge design, golden sets, CI gating |
 | `.claude/skills/chain-eval-authoring/` | On demand | Writing golden routing cases when a chain is added or expanded |

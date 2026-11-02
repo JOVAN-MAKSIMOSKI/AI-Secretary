@@ -214,9 +214,9 @@ uv run python scripts/ingest.py <files>
   printing Cyrillic to a cp1252 console.
 - `--no-metadata-llm` skips the LLM title/metadata pass (regex fallback). It
   does not affect vectors or retrieval, only the `law` label used for
-  citations — but the retrieval eval scores on that label, so a corpus built
-  this way will fail `evals/test_retrieval.py` until `scripts/enrich_metadata.py`
-  backfills it.
+  citations. The retrieval eval no longer scores on that label (it matches
+  `source_file`), so the eval still passes; the LLM's passage headers and
+  citations stay wrong until `scripts/enrich_metadata.py` backfills it.
 
 ---
 
@@ -274,11 +274,26 @@ uv run pytest evals/ -q   # paid/heavy evals: retrieval (needs Qdrant + e5 model
   with it. A local `.env` masks this — it only fails in CI. Do not remove the guard, and
   never let a `tests/` case depend on a real Supabase project. `evals/eval_env.py` keeps
   its own copy for the eval process, which does not load this conftest.
-- `evals/` holds two paid suites, each with its own self-skip so CI degrades rather than
+- `evals/` holds three paid suites, each with its own self-skip so CI degrades rather than
   fails:
-  - **retrieval** (`test_retrieval.py`) — the waste-law eval, scored as recall@k against
-    `evals/baseline.json`, golden cases in `evals/golden/retrieval.jsonl`. Skips when no
-    Qdrant collection is reachable.
+  - **answers** (`test_answers.py`) — generates answers for a fixed sample of the
+    retrieval golden set (every 3rd dev case + all off-topic) through
+    `DirectQdrantQueryEngine.answer` and gates deterministic rates against
+    `evals/answer_baseline.json`: citations of articles neither retrieved nor
+    referenced in a passage, language match, Russian/Serbian leaks, off-topic answers
+    that cite law. No LLM judge. Needs Qdrant and `EVALAPIKEY`; pins its own model
+    (`EVAL_RAG_LLM_MODEL`). Checks live in `evals/answer_checks.py` (pure, covered by
+    `tests/test_answer_checks.py`). They cannot see whether a citation supports its
+    claim or whether an obligation went to the right party — that still takes a human
+    read.
+  - **retrieval** (`test_retrieval.py`) — the waste-law eval, golden cases in
+    `evals/golden/retrieval.jsonl`, floors in `evals/baseline.json`. Four gated metrics:
+    document recall@k, article recall@k, document MRR, article MRR, plus a per-category
+    document-recall floor. Skips when no Qdrant collection is reachable;
+    `REQUIRE_RETRIEVAL_EVAL=1` turns that skip into a failure. Schema and scoring live in
+    `evals/retrieval_scoring.py` (pure), and `tests/test_retrieval_golden.py` validates
+    the golden file and the scoring maths on every push, so the half that CI cannot run
+    is still checked offline.
   - **extraction** (`test_extraction.py`) — field accuracy for all five `/documents/extract*`
     chains (invoice, calendar, offer, identification_form, transport_form), scored per
     expected field and aggregated per chain against `evals/extraction_baseline.json`.
@@ -288,7 +303,36 @@ uv run pytest evals/ -q   # paid/heavy evals: retrieval (needs Qdrant + e5 model
 
 When adding a retrieval case, author it against measured output and skip questions whose
 correct source is genuinely ambiguous — several laws carry penalty and reporting
-provisions, so a single `expect_law` for those would test nothing.
+provisions, so a single expectation for those would test nothing. Rules for the golden
+set:
+
+- `expect[].source` is a substring of the `source_file` payload, never of the `law`
+  label. The label is LLM-generated at ingest, can change on a re-ingest, and is wrong
+  on some files (two rulebooks carry "Закон за управување со отпадот 216/21").
+- List every correct source. A case is article-level only when every entry names its
+  `articles`; one entry without them makes the whole case document-level.
+- Write questions the way a business owner asks them. A question that repeats the
+  article title only tests string overlap — that is why the original 9 cases scored a
+  meaningless 9/9.
+- Keep the set fixed and append. Edit or delete a case only when it is wrong or the law
+  changed, as its own commit. `holdout` cases are never looked at while tuning chunking
+  or prompts; every category keeps at least one (enforced offline).
+- `off_topic` cases are reported, not gated, until retrieval has a relevance cutoff.
+
+### RAG answer prompt (`services/ragagent.py`)
+
+`LEGAL_ADVISOR_PROMPT` goes in a **system** message; profile, history, passages and the
+question go in the user message (`build_messages`). Every rule in it answers a failure
+measured in the 2026-11-02 manual review — `tests/test_rag_voice_concise.py` pins the key
+phrases. Do not reintroduce:
+
+- a mandatory "concrete steps" section — it made the model invent steps and attach
+  article numbers that were never retrieved (7 of 20 answers);
+- bare "Член N" citations — always "Член N од <source>" from the passage header;
+- a claim of "deep knowledge" of a law — it invites answers from outside the passages.
+
+`RAG_LLM_TEMPERATURE` is pinned explicitly; tune it or `top_p`, never both. There is no
+Anthropic branch: `RAG_LLM_PROVIDER=anthropic` raises at startup.
 
 Extraction cases follow the same author-against-measured-output rule, with one deliberate
 exception: `expect` encodes **correct** behaviour, not observed behaviour. When a probe

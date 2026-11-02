@@ -63,7 +63,8 @@ jobs:
         working-directory: apps/python
 
       # Gate A (python half) — the whole tests/ suite: RAG injection guards, invoice
-      # math, waste-form request models, lookups, renderers, and route logic.
+      # math, waste-form request models, lookups, renderers, route logic, and the
+      # retrieval golden file + scoring maths (the retrieval eval itself skips in CI).
       # No Qdrant, no model load, no network, ~8s. Deliberately has no `env:` block:
       # tests/conftest.py supplies dummy Supabase values so the import-time client in
       # services/storage.py can be built without ever reaching a real project.
@@ -71,7 +72,9 @@ jobs:
         run: uv run pytest -q
         working-directory: apps/python
 
-      # Gate C — two paid python evals, each with its own self-skip:
+      # Gate C — three paid python evals, each with its own self-skip:
+      #  - answer checks (citations, language, off-topic): needs Qdrant AND EVALAPIKEY,
+      #    so it skips in CI for the same reason as retrieval.
       #  - retrieval recall: skips (~2s, no model load) unless a Qdrant collection is
       #    reachable — it is not in CI today (qdrant_data/ is gitignored, e5-large is
       #    ~2GB). Enabling it later means setting QDRANT_URL, not editing this file,
@@ -79,13 +82,15 @@ jobs:
       #  - extraction field accuracy (layer 1): runs whenever EVALAPIKEY is present.
       #    Calls the extraction chains directly — no FastAPI boot, no Supabase (the
       #    eval passes owner_auth_id=None, and eval_env.py sets import-guard values).
+      # -rs prints each skip's reason in the summary: under plain -q a skipped retrieval
+      # eval is a lone "s" that reads as green, hiding that RAG retrieval went unmeasured.
       - name: Eval gate C — retrieval recall + extraction accuracy
         env:
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_COLLECTION: ${{ vars.QDRANT_COLLECTION }}
           EVALAPIKEY: ${{ secrets.EVALAPIKEY }}
-        run: uv run pytest evals/ -q
+        run: uv run pytest evals/ -q -rs
         working-directory: apps/python
 
       # Gate B — live routing accuracy against the committed baseline in
