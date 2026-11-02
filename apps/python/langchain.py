@@ -240,6 +240,15 @@ def _coerce_extracted_value(key: str, value: Any) -> Any:
 # units / price_per_unit between identical requests. Keep it at 0 for reproducibility.
 _EXTRACTION_TEMPERATURE = 0.0
 
+# Same default as RAG_LLM_DEFAULT_MODEL in services/ragagent.py — both read RAG_LLM_MODEL.
+_EXTRACTION_DEFAULT_MODEL = "gpt-6-luna"
+
+# gpt-6 models are reasoning models and reject temperature 0 unless reasoning_effort is
+# "none"; non-reasoning models (gpt-4o-mini) reject the parameter outright. Send it only
+# where it is accepted, so reverting RAG_LLM_MODEL via env never 400s.
+_REASONING_MODEL_PREFIXES = ("gpt-6",)
+_EXTRACTION_REASONING_EFFORT = "none"
+
 
 def get_extraction_llm() -> ChatOpenAI:
     """Initialize the extraction LLM from the shared RAG_LLM_* provider settings."""
@@ -259,10 +268,17 @@ def get_extraction_llm() -> ChatOpenAI:
         if not openai_api_key:
             raise RuntimeError("OPENAI_API_KEY (or RAG_OPENAI_API_KEY) is required for RAG_LLM_PROVIDER=openai")
 
+        model = os.getenv("RAG_LLM_MODEL") or _EXTRACTION_DEFAULT_MODEL
+        reasoning = (
+            {"reasoning_effort": _EXTRACTION_REASONING_EFFORT}
+            if model.startswith(_REASONING_MODEL_PREFIXES)
+            else {}
+        )
         return ChatOpenAI(
-            model=os.getenv("RAG_LLM_MODEL", "gpt-4.1-mini"),
+            model=model,
             api_key=openai_api_key,
             temperature=_EXTRACTION_TEMPERATURE,
+            **reasoning,
         )
 
     # "github" was removed when GitHub Models was retired (HTTP 410

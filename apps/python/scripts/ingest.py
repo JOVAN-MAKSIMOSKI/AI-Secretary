@@ -8,8 +8,8 @@ Pipeline (waste-law RAG advisor, Phase 1):
      Articles longer than the e5 512-token context are sub-split with
      sentence-aware overlap, keeping the same article metadata.
   3. Per-article metadata (title, waste_types, entity_types) extracted once
-     at ingest time with a lightweight LLM (GitHub Models gpt-4o-mini);
-     regex fallback if the LLM is unavailable.
+     at ingest time with a lightweight LLM (OpenAI gpt-4o-mini,
+     METADATA_LLM_MODEL); regex fallback if the LLM is unavailable.
   4. Embed locally with intfloat/multilingual-e5-large (1024-dim).
      E5 requires the "passage: " prefix on documents — queries must use
      "query: " (handled in services/ragagent.py).
@@ -27,9 +27,11 @@ Usage:
     python scripts/ingest.py --no-metadata-llm ...           # regex-only metadata
 
 Required env vars (loaded from apps/python/.env):
-    QDRANT_LOCAL_PATH     local Qdrant storage directory (or QDRANT_URL)
+    QDRANT_URL            Qdrant server (dev: docker compose -f docker-compose.dev.yml up -d).
+                          QDRANT_LOCAL_PATH embedded mode still works but is single-writer
+                          and cannot snapshot, so --recreate refuses to run on it.
     QDRANT_COLLECTION     target collection (default: waste_management_law_mk_v2)
-    OPENAI_API_KEY        only needed for LLM metadata extraction
+    OPENAI_API_KEY        only needed for LLM metadata extraction (or RAG_OPENAI_API_KEY)
 
 System requirements for OCR of scanned pages:
     Tesseract binary with the Macedonian language pack ("mkd").

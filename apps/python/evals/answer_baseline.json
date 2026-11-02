@@ -1,0 +1,9 @@
+{
+  "_comment": "Committed contract for the answer eval (evals/test_answers.py, checks in evals/answer_checks.py). Sample: every 3rd in-domain dev case of evals/golden/retrieval.jsonl + all 4 off-topic = 24 answers, model EVAL_RAG_LLM_MODEL (gpt-4o-mini until 2026-11-02, gpt-6-luna with reasoning_effort none since 2026-11-03), top_k 10, collection waste_management_law_mk_v2 (4585 chunks).",
+  "_comment_measured": "2026-11-02. Old prompt (single user string, mandatory 'concrete steps'): unsupportedCitationRate 0.25, languageMatchRate 0.955, foreignMarkerRate 0.091, offTopicCitingRate 0.5 (22-answer sample, 2 off-topic). New prompt, three runs (first version, then the refined final version twice): unsupported 0.00 / 0.05 / 0.00, language 0.958 / 1.000 / 1.000, foreign 0, off-topic citing 0. Each floor fails on the old prompt's number while tolerating the run-to-run spread seen across the three runs (temperature 0.1 still samples). 2026-11-03, gpt-6-luna (reasoning_effort none, temperature 0.1), two runs: unsupported 0.000 / 0.000, language 1.000 / 1.000, foreign 0, off-topic citing 0. Floors unchanged.",
+  "_comment_limits": "Deterministic only. These rates cannot see whether a citation supports its claim, whether an obligation was given to the right party, or whether an exception was dropped — the manual review (judge_rubric) found those in 2-3 of 20 answers even after the prompt change. Lowering a floor accepts a regression and must be its own reviewable diff.",
+  "maxUnsupportedCitationRate": 0.15,
+  "minLanguageMatchRate": 0.9,
+  "maxForeignMarkerRate": 0.05,
+  "maxOffTopicCitingRate": 0.25
+}
